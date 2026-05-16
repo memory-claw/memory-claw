@@ -1,9 +1,12 @@
 import time
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from institutional_memory.listener import (
     DedupeSet,
     ListenerState,
+    build_thread_context,
     build_search_query,
     format_no_hits_reply,
     format_reply,
@@ -13,6 +16,7 @@ from institutional_memory.listener import (
     should_skip,
     strip_mention,
 )
+from institutional_memory.slack_promotion import PromotionRateLimiter
 
 
 def test_should_skip_bot_id():
@@ -110,6 +114,12 @@ def test_resolve_channels_passes_through_ids():
     assert result == {"C123", "C456"}
 
 
+def test_resolve_channels_passes_through_private_channel_ids():
+    client = FakeWebClient([])
+    result = resolve_channels("G123,G456", fallback_channel="", client=client)
+    assert result == {"G123", "G456"}
+
+
 def test_resolve_channels_converts_names_to_ids():
     client = FakeWebClient([
         {"id": "C123", "name": "general"},
@@ -170,14 +180,32 @@ def test_strip_mention_multiple():
 class FakeRepliesClient:
     def __init__(self, replies):
         self._replies = replies
+        self.calls = []
 
-    def conversations_replies(self, channel, ts, limit):
-        return {"messages": self._replies}
+    def conversations_replies(self, channel, ts, limit, cursor=None):
+        self.calls.append({"channel": channel, "ts": ts, "limit": limit, "cursor": cursor})
+        return {"messages": self._replies[:limit]}
 
 
 class FakeFailingRepliesClient:
     def conversations_replies(self, channel, ts, limit):
         raise Exception("API error")
+
+
+class FakePaginatedRepliesClient:
+    def __init__(self, pages):
+        self._pages = pages
+        self.calls = []
+
+    def conversations_replies(self, channel, ts, limit, cursor=None):
+        self.calls.append({"channel": channel, "ts": ts, "limit": limit, "cursor": cursor})
+        page_index = int(cursor or 0)
+        next_index = page_index + 1
+        next_cursor = str(next_index) if next_index < len(self._pages) else ""
+        return {
+            "messages": self._pages[page_index],
+            "response_metadata": {"next_cursor": next_cursor},
+        }
 
 
 def test_query_top_level_strips_mention():
@@ -225,6 +253,61 @@ def test_query_thread_api_failure_falls_back():
     client = FakeFailingRepliesClient()
     query = build_search_query(event, bot_user_id="U999", client=client)
     assert query == "help me"
+
+
+def test_thread_context_prefers_recent_human_messages():
+    event = {"channel": "C123", "text": "latest?", "ts": "2.0", "thread_ts": "1.0"}
+    replies = [{"user": "U123", "text": f"message {i}"} for i in range(12)]
+    client = FakeRepliesClient(replies)
+
+    context = build_thread_context(event, bot_user_id="U999", client=client)
+
+    assert "message 0" not in context
+    assert "message 11" in context
+
+
+def test_thread_context_paginates_before_selecting_recent_messages():
+    event = {"channel": "C123", "text": "latest?", "ts": "2.0", "thread_ts": "1.0"}
+    client = FakePaginatedRepliesClient(
+        [
+            [{"user": "U123", "text": f"old {i}"} for i in range(100)],
+            [{"user": "U123", "text": f"recent {i}"} for i in range(12)],
+        ]
+    )
+
+    context = build_thread_context(event, bot_user_id="U999", client=client)
+
+    assert "old 99" not in context
+    assert "recent 11" in context
+    assert client.calls[1]["cursor"] == "1"
+
+
+def test_thread_context_caps_at_2000_chars_and_filters_bots():
+    event = {"channel": "C123", "text": "summarize", "ts": "2.0", "thread_ts": "1.0"}
+    replies = [
+        {"bot_id": "B456", "text": "bot noise"},
+        {"user": "U123", "text": "x" * 3000},
+    ]
+    client = FakeRepliesClient(replies)
+
+    context = build_thread_context(event, bot_user_id="U999", client=client)
+
+    assert "bot noise" not in context
+    assert len(context) == 2000
+
+
+def test_thread_context_trims_to_newline_boundary():
+    event = {"channel": "C123", "text": "latest?", "ts": "2.0", "thread_ts": "1.0"}
+    replies = [
+        {"user": "U123", "text": "old " + ("x" * 100)},
+        {"user": "U123", "text": "recent one"},
+        {"user": "U123", "text": "recent two"},
+    ]
+    client = FakeRepliesClient(replies)
+
+    context = build_thread_context(event, bot_user_id="U999", client=client, max_chars=30)
+
+    assert context == "recent one\nrecent two"
 
 
 # --- Task 4: Reply formatting ---
@@ -285,6 +368,20 @@ def _make_state(allowed_channels=None, bot_user_id="UBOT"):
     )
 
 
+def test_listener_state_carries_promotion_state():
+    rate_limiter = PromotionRateLimiter()
+    state = ListenerState(
+        bot_user_id="UBOT",
+        allowed_channels={"C100"},
+        dedupe=DedupeSet(max_size=100, ttl_seconds=60),
+        promotion_allowed_channels={"C200"},
+        promotion_rate_limiter=rate_limiter,
+    )
+
+    assert state.promotion_allowed_channels == {"C200"}
+    assert state.promotion_rate_limiter is rate_limiter
+
+
 class MockWebClient:
     def __init__(self):
         self.posted = []
@@ -295,6 +392,224 @@ class MockWebClient:
 
     def conversations_replies(self, channel, ts, limit=10):
         return {"messages": []}
+
+
+class FakePolicy:
+    def __init__(self, access_by_source, default="restricted"):
+        self._access_by_source = access_by_source
+        self._default = default
+
+    def access_for(self, source):
+        return self._access_by_source.get(source, self._default)
+
+
+@pytest.fixture(autouse=True)
+def _share_source_policy_by_default():
+    with patch(
+        "institutional_memory.listener.load_source_policy",
+        return_value=FakePolicy({}, default="share"),
+    ):
+        yield
+
+
+def test_handle_reply_uses_policy_and_composer_fallback():
+    state = _make_state()
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "<@UBOT> What was our Q3 strategy?",
+    }
+    allowed = "company/corpus/allowed.md"
+    hidden = "company/corpus/hidden.md"
+    hits = [
+        {"score": 0.85, "text": "Allowed memory", "source": allowed},
+        {"score": 0.84, "text": "Hidden memory", "source": hidden},
+    ]
+    policy = FakePolicy({allowed: "share", hidden: "restricted"})
+
+    with patch("institutional_memory.listener.search_memory", return_value=hits):
+        with patch("institutional_memory.listener.load_source_policy", return_value=policy, create=True):
+            with patch(
+                "institutional_memory.listener.compose_slack_answer",
+                return_value="Allowed memory\n\nSources:\n1. allowed.md",
+                create=True,
+            ) as compose:
+                with patch("institutional_memory.listener.log_event"):
+                    result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert "Allowed" in client.posted[0]["text"]
+    assert "Hidden" not in client.posted[0]["text"]
+    compose.assert_called_once()
+    assert state.thread_source_refs[("C100", "1.0")][0]["source"] == allowed
+    assert all(ref["source"] != hidden for ref in state.thread_source_refs[("C100", "1.0")])
+
+
+def test_offer_footer_shown_once_and_sets_pending_offer():
+    state = _make_state()
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "What was our Q3 strategy?",
+    }
+    hits = [{"score": 0.85, "text": "Allowed memory", "source": "company/corpus/allowed.md"}]
+    policy = FakePolicy({"company/corpus/allowed.md": "share"})
+
+    def fake_compose(thread_text, visible_hits, *, intent=None, advice_mode="offer", include_footer=False):
+        assert include_footer is True
+        return 'Allowed memory\n\nNext: reply "advice".'
+
+    with patch("institutional_memory.listener.search_memory", return_value=hits):
+        with patch("institutional_memory.listener.load_source_policy", return_value=policy, create=True):
+            with patch(
+                "institutional_memory.listener.compose_slack_answer",
+                side_effect=fake_compose,
+                create=True,
+            ):
+                with patch("institutional_memory.listener.log_event"):
+                    result = handle_listener_event(event, client, state)
+
+    key = ("C100", "1.0")
+    assert result["status"] == "replied"
+    assert key in state.thread_footer_shown
+    assert key in state.thread_advice_offer_pending
+
+
+def test_offer_footer_shown_again_when_source_commands_change():
+    state = _make_state()
+    client = MockWebClient()
+    first_event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "What was our Q3 strategy?",
+    }
+    second_event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "user": "U123",
+        "text": "Any more?",
+    }
+    hits = [{"score": 0.85, "text": "Allowed memory", "source": "company/corpus/allowed.md"}]
+
+    policies = [
+        FakePolicy({"company/corpus/allowed.md": "cite_only"}),
+        FakePolicy({"company/corpus/allowed.md": "share"}),
+    ]
+    include_footer_values = []
+
+    def fake_compose(thread_text, visible_hits, *, intent=None, advice_mode="offer", include_footer=False):
+        include_footer_values.append(include_footer)
+        return 'Allowed memory\n\nNext: reply "advice".' if include_footer else "Allowed memory"
+
+    with patch("institutional_memory.listener.search_memory", return_value=hits):
+        with patch("institutional_memory.listener.load_source_policy", side_effect=policies):
+            with patch("institutional_memory.listener.compose_slack_answer", side_effect=fake_compose):
+                with patch("institutional_memory.listener.log_event"):
+                    handle_listener_event(first_event, client, state)
+                    handle_listener_event(second_event, client, state)
+
+    assert include_footer_values == [True, True]
+
+
+def test_show_source_after_normal_reply_uses_policy_filtered_refs_without_search():
+    state = _make_state()
+    client = MockWebClient()
+    allowed = "company/corpus/allowed.md"
+    hidden = "company/corpus/hidden.md"
+    hits = [
+        {"score": 0.85, "text": "Allowed memory", "source": allowed},
+        {"score": 0.84, "text": "Hidden memory", "source": hidden},
+    ]
+    policy = FakePolicy({allowed: "share", hidden: "restricted"})
+    normal_event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "What was our Q3 strategy?",
+    }
+    source_event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "user": "U123",
+        "text": "show source 1",
+    }
+
+    with patch("institutional_memory.listener.search_memory", return_value=hits) as search_memory:
+        with patch("institutional_memory.listener.load_source_policy", return_value=policy, create=True):
+            with patch(
+                "institutional_memory.listener.compose_slack_answer",
+                return_value="Allowed memory\n\nSources:\n1. allowed.md",
+                create=True,
+            ):
+                with patch("institutional_memory.listener.log_event"):
+                    normal_result = handle_listener_event(normal_event, client, state)
+
+    assert normal_result["status"] == "replied"
+    assert [ref["source"] for ref in state.thread_source_refs[("C100", "1.0")]] == [allowed]
+
+    with patch("institutional_memory.listener.search_memory") as second_search:
+        with patch("institutional_memory.source_policy.load_source_policy", return_value=policy):
+            with patch("institutional_memory.listener.log_event"):
+                source_result = handle_listener_event(source_event, client, state)
+
+    assert source_result["status"] == "replied"
+    assert "Allowed memory" in client.posted[-1]["text"]
+    assert "Hidden" not in client.posted[-1]["text"]
+    search_memory.assert_called_once()
+    second_search.assert_not_called()
+
+
+def test_policy_load_failure_returns_error_without_crashing():
+    state = _make_state()
+    client = MockWebClient()
+    event = {"type": "message", "channel": "C100", "ts": "1.0", "user": "U123", "text": "What was our Q3 strategy?"}
+    hits = [{"score": 0.85, "text": "Memory", "source": "company/corpus/q3.md"}]
+
+    with patch("institutional_memory.listener.search_memory", return_value=hits):
+        with patch("institutional_memory.listener.load_source_policy", side_effect=ValueError("bad policy")):
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "error"
+    assert "bad policy" in result["error"]
+    assert client.posted == []
+
+
+def test_mention_replies_when_policy_filters_all_hits():
+    state = _make_state(allowed_channels=set())
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C200",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "<@UBOT> what is our policy?",
+    }
+    hits = [{"score": 0.85, "text": "Restricted memory", "source": "company/corpus/restricted.md"}]
+    policy = FakePolicy({"company/corpus/restricted.md": "restricted"})
+
+    with patch("institutional_memory.listener.search_memory", return_value=hits):
+        with patch("institutional_memory.listener.load_source_policy", return_value=policy):
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert result["hits"] == 0
+    assert "slack-shareable" in client.posted[0]["text"].lower()
+    assert "Restricted memory" not in client.posted[0]["text"]
 
 
 def test_handle_unprompted_hit_replies_in_thread():
@@ -390,6 +705,236 @@ def test_handle_app_mention_event():
             result = handle_listener_event(event, client, state)
 
     assert result["status"] == "replied"
+
+
+def test_mention_advice_on_command_updates_thread_mode_without_search():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    client = MockWebClient()
+    event = {"type": "message", "channel": "C100", "ts": "2.0", "thread_ts": "1.0", "user": "U123", "text": "<@UBOT> advice on"}
+
+    with patch("institutional_memory.listener.search_memory") as search_memory:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert state.thread_advice_modes[("C100", "1.0")] == "on"
+    assert "advice mode is on" in client.posted[0]["text"].lower()
+    search_memory.assert_not_called()
+
+
+def test_short_yes_requires_pending_offer():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    client = MockWebClient()
+    event = {"type": "message", "channel": "C100", "ts": "2.0", "thread_ts": "1.0", "user": "U123", "text": "yes"}
+
+    with patch("institutional_memory.listener.search_memory", return_value=[]) as search_memory:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "skipped"
+    assert state.thread_advice_modes == {}
+    search_memory.assert_called_once()
+
+
+def test_short_yes_after_pending_offer_sets_advice_on_without_search():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    state.thread_advice_offer_pending.add(("C100", "1.0"))
+    client = MockWebClient()
+    event = {"type": "message", "channel": "C100", "ts": "2.0", "thread_ts": "1.0", "user": "U123", "text": "yes"}
+
+    with patch("institutional_memory.listener.search_memory") as search_memory:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert state.thread_advice_modes[("C100", "1.0")] == "on"
+    search_memory.assert_not_called()
+
+
+def test_short_bot_reply_in_active_thread_still_filtered():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    state.thread_advice_offer_pending.add(("C100", "1.0"))
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "bot_id": "B123",
+        "text": "yes",
+    }
+
+    with patch("institutional_memory.listener.search_memory") as search_memory:
+        result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "filtered"
+    assert state.thread_advice_modes == {}
+    search_memory.assert_not_called()
+
+
+def test_show_source_uses_recent_thread_refs_without_search():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    state.thread_source_refs[("C100", "1.0")] = [
+        {
+            "source": "company/corpus/q3.md",
+            "text": "Retention strategy shifted toward product-led growth.",
+            "access": "share",
+        }
+    ]
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "user": "U123",
+        "text": "show source 1",
+    }
+
+    with patch(
+        "institutional_memory.listener.render_source_command",
+        return_value={"status": "ok", "text": "Source 1: q3.md\n\n> Retention strategy shifted."},
+    ):
+        with patch("institutional_memory.listener.search_memory") as search_memory:
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert result["hits"] == 0
+    assert "Retention strategy shifted" in client.posted[0]["text"]
+    search_memory.assert_not_called()
+
+
+def test_show_source_without_recent_refs_replies_missing():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "user": "U123",
+        "text": "show source 1",
+    }
+
+    with patch("institutional_memory.listener.search_memory") as search_memory:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert "recent source list" in client.posted[0]["text"].lower()
+    search_memory.assert_not_called()
+
+
+def test_show_source_render_error_returns_error_without_crashing():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    state.thread_source_refs[("C100", "1.0")] = [
+        {"source": "company/corpus/q3.md", "text": "Retention strategy", "access": "share"}
+    ]
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "user": "U123",
+        "text": "show source 1",
+    }
+
+    with patch("institutional_memory.listener.render_source_command", side_effect=ValueError("bad policy")):
+        with patch("institutional_memory.listener.search_memory") as search_memory:
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "error"
+    assert "bad policy" in result["error"]
+    search_memory.assert_not_called()
+
+
+def test_show_full_source_cooldown():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    state.thread_source_refs[("C100", "1.0")] = [
+        {"source": "company/corpus/q3.md", "text": "Retention strategy", "access": "share"}
+    ]
+    state.thread_full_source_cooldowns[("C100", "1.0", 1)] = time.monotonic()
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "user": "U123",
+        "text": "show full source 1",
+    }
+
+    with patch("institutional_memory.listener.search_memory") as search_memory:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert "wait" in client.posted[0]["text"].lower()
+    search_memory.assert_not_called()
+
+
+def test_show_full_source_post_failure_does_not_set_cooldown():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    state.thread_source_refs[("C100", "1.0")] = [
+        {"source": "company/corpus/q3.md", "text": "Retention strategy", "access": "share"}
+    ]
+    client = MockWebClient()
+    client.chat_postMessage = MagicMock(side_effect=Exception("Slack down"))
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "user": "U123",
+        "text": "show full source 1",
+    }
+
+    with patch("institutional_memory.listener.render_source_command", return_value={"status": "ok", "text": "full"}):
+        with patch("institutional_memory.listener.search_memory") as search_memory:
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "error"
+    assert state.thread_full_source_cooldowns == {}
+    search_memory.assert_not_called()
+
+
+def test_advice_command_post_failure_does_not_mutate_mode():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    state.thread_advice_offer_pending.add(("C100", "1.0"))
+    client = MockWebClient()
+    client.chat_postMessage = MagicMock(side_effect=Exception("Slack down"))
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "user": "U123",
+        "text": "yes",
+    }
+
+    with patch("institutional_memory.listener.search_memory") as search_memory:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "error"
+    assert state.thread_advice_modes == {}
+    assert ("C100", "1.0") in state.thread_advice_offer_pending
+    search_memory.assert_not_called()
 
 
 def test_handle_search_failure_no_crash():

@@ -19,6 +19,7 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 from institutional_memory.audit import log_event
 from institutional_memory.config import (
     LISTENER_CHANNELS,
+    PROMOTION_ALLOWED_CHANNELS,
     SLACK_APP_TOKEN,
     SLACK_BOT_TOKEN,
     SLACK_CHANNEL,
@@ -30,6 +31,7 @@ from institutional_memory.listener import (
     resolve_channels,
 )
 from institutional_memory.slack_ingest import handle_message_event
+from institutional_memory.slack_promotion import PromotionRateLimiter, handle_reaction_event
 
 
 def _build_state(web_client: WebClient) -> ListenerState:
@@ -39,11 +41,16 @@ def _build_state(web_client: WebClient) -> ListenerState:
     allowed_channels = resolve_channels(
         LISTENER_CHANNELS, fallback_channel=SLACK_CHANNEL, client=web_client
     )
+    promotion_allowed_channels = resolve_channels(
+        PROMOTION_ALLOWED_CHANNELS, fallback_channel="", client=web_client
+    )
 
     return ListenerState(
         bot_user_id=bot_user_id,
         allowed_channels=allowed_channels,
         dedupe=DedupeSet(),
+        promotion_allowed_channels=promotion_allowed_channels,
+        promotion_rate_limiter=PromotionRateLimiter(),
     )
 
 
@@ -56,6 +63,19 @@ def process(
     if request.type == "events_api":
         client.send_socket_mode_response(SocketModeResponse(envelope_id=request.envelope_id))
         event = request.payload.get("event", {})
+
+        if event.get("type") == "reaction_added":
+            if state.promotion_rate_limiter is None:
+                state.promotion_rate_limiter = PromotionRateLimiter()
+            result = handle_reaction_event(
+                event=event,
+                client=web_client,
+                allowed_channels=state.promotion_allowed_channels,
+                rate_limiter=state.promotion_rate_limiter,
+                bot_user_id=state.bot_user_id,
+            )
+            print(json.dumps(result, ensure_ascii=False), flush=True)
+            return
 
         # Existing ingestion (write to inbox)
         try:
@@ -92,12 +112,18 @@ def main() -> int:
     web_client = WebClient(token=SLACK_BOT_TOKEN)
     state = _build_state(web_client)
 
-    log_event("listener_started", bot_user_id=state.bot_user_id, channels=sorted(state.allowed_channels))
+    log_event(
+        "listener_started",
+        bot_user_id=state.bot_user_id,
+        channels=sorted(state.allowed_channels),
+        promotion_channels=sorted(state.promotion_allowed_channels),
+    )
     print(
         json.dumps({
             "status": "listening",
             "bot_user_id": state.bot_user_id,
             "channels": sorted(state.allowed_channels),
+            "promotion_channels": sorted(state.promotion_allowed_channels),
         }),
         flush=True,
     )
