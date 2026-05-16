@@ -124,12 +124,20 @@
     .empty { text-align: center; color: var(--muted); padding: 48px; }
     .loading { color: var(--muted); padding: 24px; }
   </style>
+  <link rel="stylesheet" href="/static/controls.css" />
 </head>
 <body>
   <div class="wrap">
     <a class="back" href="/">← back to dashboard</a>
     <h1>inbox</h1>
     <p class="page-sub">All drafts in company/inbox/ with bot decisions from processed_drafts.json and audit_log.jsonl</p>
+    <div class="inbox-controls">
+      <div class="search-wrap">
+        <input class="search-input" id="inbox-search" type="search" placeholder="Search inbox..." autocomplete="off" />
+        <button class="search-clear" id="inbox-search-clear" type="button" aria-label="Clear search">X</button>
+      </div>
+      <div class="filter-bar" id="inbox-filter-bar"></div>
+    </div>
     <div id="drafts"><p class="loading">Loading drafts…</p></div>
   </div>
   <script>
@@ -143,6 +151,66 @@
       if (!p) return "";
       const parts = p.split("/");
       return parts[parts.length - 1];
+    }
+
+    const INBOX_FILTERS = [
+      ["all", "All"], ["draft", "Draft"], ["policy", "Policy"],
+      ["contract", "Contract"], ["rfp", "RFP"], ["postmortem", "Postmortem"],
+      ["slack", "Slack"], ["other", "Other"],
+    ];
+    let inboxTypeFilter = "all";
+    let inboxSearchTerm = "";
+    let inboxSearchTimer = null;
+
+    function renderInboxFilters() {
+      document.getElementById("inbox-filter-bar").innerHTML = INBOX_FILTERS
+        .map(([val, label]) =>
+          `<button type="button" class="filter-btn ${val === inboxTypeFilter ? "active" : ""}" data-filter="${esc(val)}">${esc(label)}</button>`
+        ).join("");
+      document.querySelectorAll("#inbox-filter-bar .filter-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          inboxTypeFilter = btn.dataset.filter || "all";
+          renderInboxFilters();
+          applyInboxFilters();
+        });
+      });
+    }
+
+    function applyInboxFilters() {
+      const cards = [...document.querySelectorAll("#drafts .draft-card")];
+      let visible = 0;
+      cards.forEach((card) => {
+        const typeOk = inboxTypeFilter === "all" || card.dataset.type === inboxTypeFilter;
+        const textOk = !inboxSearchTerm || (card.dataset.search || "").includes(inboxSearchTerm);
+        card.hidden = !(typeOk && textOk);
+        if (!card.hidden) visible++;
+      });
+      const old = document.querySelector("#drafts .filtered-empty");
+      if (old) old.remove();
+      if (cards.length && !visible) {
+        document.getElementById("drafts").insertAdjacentHTML("beforeend",
+          '<p class="filtered-empty">No inbox items match filters</p>');
+      }
+    }
+
+    function setupInboxSearch() {
+      const input = document.getElementById("inbox-search");
+      const clear = document.getElementById("inbox-search-clear");
+      input.addEventListener("input", () => {
+        clear.classList.toggle("visible", input.value.length > 0);
+        clearTimeout(inboxSearchTimer);
+        inboxSearchTimer = setTimeout(() => {
+          inboxSearchTerm = input.value.trim().toLowerCase();
+          applyInboxFilters();
+        }, 200);
+      });
+      clear.addEventListener("click", () => {
+        input.value = "";
+        inboxSearchTerm = "";
+        clear.classList.remove("visible");
+        applyInboxFilters();
+        input.focus();
+      });
     }
 
     function stripHtml(html) {
@@ -199,8 +267,11 @@
       });
     }
 
-    function renderDraft(d) {
+    function renderDraft(d)    function renderDraft(d) {
       const pills = [];
+      const itemType = d.type || "other";
+      const searchText = [d.path, d.name, d.title, d.matched_source, basename(d.matched_source), d.summary, d.body_markdown, d.slack_message]
+        .filter(Boolean).map(s => String(s).toLowerCase()).join(" ");
       if (d.matched_source) pills.push(`<span class="pill">${esc(basename(d.matched_source))}</span>`);
       if (d.score != null) pills.push(`<span class="pill">score ${esc(Number(d.score).toFixed(2))}</span>`);
       if (d.slack_channel) pills.push(`<span class="pill">${esc(d.slack_channel)}</span>`);
@@ -220,7 +291,7 @@
           ? `<div class="slack-msg">No message sent.${d.skip_reason ? " " + esc(d.skip_reason) : ""}</div>`
           : "";
 
-      return `<article class="draft-card" id="${esc(d.path)}">
+      return `<article class="draft-card" id="${esc(d.path)}" data-type="${esc(itemType)}" data-search="${esc(searchText)}">
         <div class="draft-head">
           <div>
             <div class="draft-title">${esc(d.title)}</div>
@@ -250,6 +321,7 @@
         }
         el.innerHTML = items.map(renderDraft).join("");
         bindBodyToggles(el);
+        applyInboxFilters();
         if (location.hash) {
           const target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
           if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -259,6 +331,8 @@
       }
     }
 
+    renderInboxFilters();
+    setupInboxSearch();
     load();
   </script>
 </body>
