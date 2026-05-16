@@ -42,6 +42,7 @@ def _patch_promotion_paths(monkeypatch, tmp_path):
     monkeypatch.setattr(paths, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(paths, "COMPANY_CORPUS_PATH", company_corpus)
     monkeypatch.setattr(paths, "COMPANY_EVIDENCE_PATH", company_evidence)
+    monkeypatch.setattr(slack_promotion, "log_event", lambda *args, **kwargs: None)
     return company_corpus, company_evidence
 
 
@@ -348,12 +349,18 @@ def test_related_source_lookup_uses_bounded_audit_tail(tmp_path, monkeypatch):
         "thread_ts": "1710000000.000000",
         "sources": ["company/corpus/old_source.md"],
     })
+    recent_match = json.dumps({
+        "type": "listener_reply",
+        "channel": "C123",
+        "thread_ts": "1710000000.000000",
+        "sources": ["company/corpus/recent_source.md"],
+    })
     audit_log.write_text(
         old_match
         + "\n"
         + json.dumps({"type": "listener_skip", "channel": "C123"})
         + "\n"
-        + json.dumps({"type": "listener_skip", "channel": "C123"})
+        + recent_match
         + "\n",
         encoding="utf-8",
     )
@@ -368,7 +375,9 @@ def test_related_source_lookup_uses_bounded_audit_tail(tmp_path, monkeypatch):
 
     assert result["status"] == "promoted"
     card = company_corpus / "slack" / "promoted" / "C123_1710000000.000000.md"
-    assert "company/corpus/old_source.md" not in card.read_text(encoding="utf-8")
+    text = card.read_text(encoding="utf-8")
+    assert "company/corpus/recent_source.md" in text
+    assert "company/corpus/old_source.md" not in text
 
 
 def test_user_rate_limit_blocks_second_distinct_thread(tmp_path, monkeypatch):
