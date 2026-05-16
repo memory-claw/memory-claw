@@ -1,0 +1,39 @@
+{
+  "planPath": "docs/superpowers/plans/2026-05-16-dashboard-inbox-filter-reingest.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Backend — Document Type and Re-ingest Error Handling",
+      "status": "complete",
+      "description": "**Goal:** Extend `_infer_tag` → `_infer_document_type`, expose `type` on inbox items, add try/except to re-ingest.\n\n**Files:**\n- Modify: `dashboard/app.py`\n- Create: `tests/test_dashboard.py`\n\n```json:metadata\n{\"files\": [\"dashboard/app.py\", \"tests/test_dashboard.py\"], \"verifyCommand\": \"uv run pytest tests/test_dashboard.py -v\", \"acceptanceCriteria\": [\"_infer_document_type returns all types\", \"inbox items have type field\", \"reingest has ok field and error handling\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Shared Controls CSS",
+      "status": "complete",
+      "description": "**Goal:** Create one CSS file for search/filter controls.\n\n**Files:**\n- Create: `dashboard/static/controls.css`\n\n```json:metadata\n{\"files\": [\"dashboard/static/controls.css\"], \"verifyCommand\": \"test -f dashboard/static/controls.css\", \"acceptanceCriteria\": [\"shared CSS file created\", \"no duplicate styles\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: Dashboard Index — Inbox Filter/Search and Re-ingest UX",
+      "status": "complete",
+      "blockedBy": [1, 2],
+      "description": "**Goal:** Add search, filter buttons, and error-aware re-ingest to main dashboard.\n\n**Files:**\n- Modify: `dashboard/static/index.html`\n\n```json:metadata\n{\"files\": [\"dashboard/static/index.html\"], \"verifyCommand\": \"uv run python -m dashboard\", \"acceptanceCriteria\": [\"search input works\", \"filter buttons work\", \"reingest error shows red\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Inbox Detail Page — Search and Type Filter",
+      "status": "complete",
+      "blockedBy": [1, 2],
+      "description": "**Goal:** Add same search/filter controls to /inbox page.\n\n**Files:**\n- Modify: `dashboard/static/inbox.html`\n\n```json:metadata\n{\"files\": [\"dashboard/static/inbox.html\"], \"verifyCommand\": \"uv run python -m dashboard\", \"acceptanceCriteria\": [\"search works on inbox page\", \"filter buttons work\", \"empty state shows\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Verification",
+      "status": "complete",
+      "blockedBy": [1, 2, 3, 4],
+      "description": "**Goal:** Confirm all tests pass, no regressions.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"uv run pytest\", \"acceptanceCriteria\": [\"test_dashboard.py passes\", \"test_ingest.py passes\", \"full suite passes\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-05-16T00:00:00Z"
+}
