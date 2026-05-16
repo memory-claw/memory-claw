@@ -27,7 +27,7 @@ Each active Slack thread has an in-memory advice mode:
 
 | Mode | Behavior |
 | --- | --- |
-| `offer` | Default. Give grounded context. If the thread appears decision-sensitive, add "I can suggest a next move if useful." |
+| `offer` | Default. Give grounded context. On the first substantive bot reply in a thread, include a tiny action footer that offers advice and source commands. |
 | `on` | Include a `Suggested next move` section when retrieved context supports one. |
 | `off` | Never include advice. Only summarize the relevant memory. |
 
@@ -43,8 +43,9 @@ The listener should detect simple human messages in active bot threads:
 
 Additional natural replies after an offer:
 
-- `yes`, `go ahead`, `advice`, `what should we do`, or similar affirmative advice requests set the thread mode to `on` for that thread.
-- `no`, `no advice`, or similar negative replies set the thread mode to `off` for that thread.
+- `yes`, `go ahead`, or similar short affirmative replies set the thread mode to `on` only if the previous bot reply in that same thread included an advice offer.
+- `no`, `no advice`, or similar short negative replies set the thread mode to `off` only if the previous bot reply in that same thread included an advice offer.
+- Direct advice requests such as `advice`, `what should we do`, or `next move?` are handled as advice intent regardless of pending offer state.
 
 Toggle handling happens before memory search so command messages do not produce redundant search replies.
 
@@ -88,10 +89,10 @@ Closest precedent:
 - Lesson: do not lock timeline or contract language before scope validation.
 ```
 
-If advice is not included but the thread appears decision-sensitive:
+In `offer` mode, the first substantive bot reply in a thread may include a tiny action footer:
 
 ```text
-I can suggest a next move if useful.
+Next: reply "advice", "show source 1", or "show full source 1".
 ```
 
 ## Source Policy
@@ -112,6 +113,23 @@ Each source can be assigned one of four access levels:
 | `share` | Snippets may be passed to the LLM, and full document may be shown only after explicit `show full source N`. |
 
 Default policy should be conservative. New or unmatched files default to `restricted`. The implementation should add explicit policy entries for demo-safe corpus files that may be cited, excerpted, or shared.
+
+Rules use glob-style paths relative to the repository root. Last matching rule wins, so a broad demo-safe rule can be overridden by a specific restricted rule.
+
+Demo policy should intentionally make common mock documents shareable while showing that restrictions work:
+
+```yaml
+default: restricted
+rules:
+  - pattern: "company/corpus/mock_data/**"
+    access: share
+  - pattern: "company/corpus/2023_rfp_postmortem.txt"
+    access: share
+  - pattern: "company/corpus/mock_data/policy_docs/Secrets_Management_Policy.md"
+    access: cite_only
+  - pattern: "company/corpus/mock_data/incidents/GitHub_Credentials_Leak_2023.md"
+    access: restricted
+```
 
 Policy is enforced in deterministic code before any LLM call. Prompt instructions are not treated as a security boundary.
 
@@ -146,7 +164,11 @@ Footer rules:
 - Include `advice` only when the effective advice mode is `offer`.
 - Include `show source N` only for sources with `excerpt` or `share` policy.
 - Include `show full source N` only for sources with `share` policy.
+- Show the footer only once per active thread unless the available command set changes. The command set changes only when the visible source policies change, for example when a later reply has a `share` source after the first reply had only `excerpt` sources.
+- Mark the thread as having a pending advice offer only when the footer includes `advice`.
 - Omit the footer for confirmations like `advice on`.
+
+Full-source commands should be rate-limited per thread. A simple 30-second cooldown for `show full source N` is enough for the first implementation.
 
 ## Architecture
 
@@ -156,6 +178,7 @@ Add a response composition layer between search and Slack posting:
 Slack event
   -> listener filter and dedupe
   -> toggle detection
+  -> source display command detection
   -> thread-aware query build
   -> search_memory()
   -> apply source policy
@@ -173,6 +196,7 @@ Responsibilities:
 - Resolve effective advice behavior from thread mode and intent.
 - Build precedent comparisons from current Slack text plus top allowed memory hits.
 - Build a compact, grounded prompt for Ollama using only policy-approved excerpts.
+- Build action footers from advice mode plus source policy.
 - Validate and trim model output for Slack.
 - Provide deterministic fallback formatting.
 
@@ -187,6 +211,7 @@ Responsibilities:
 - Filter `restricted` hits before composition.
 - Remove excerpts from `cite_only` hits before LLM prompts.
 - Resolve source display commands like `show source 1` and `show full source 1`.
+- Enforce source command policy and return a user-safe refusal for `cite_only` or unavailable sources.
 
 Modified module:
 
@@ -195,9 +220,25 @@ Modified module:
 Responsibilities:
 
 - Store `thread_advice_modes`.
+- Store `thread_footer_shown` and `thread_advice_offer_pending` flags.
+- Store `thread_source_refs` for the most recent visible source list in each active thread.
+- Store `thread_full_source_cooldowns` for simple source command rate limiting.
 - Handle advice toggle commands before search.
+- Handle source display commands before search.
 - Pass current text, thread context, hits, mode, and intent into the composer.
 - Log response mode and intent in `listener_reply`.
+
+## Thread Context Window
+
+Retrieval and composition should share one bounded human thread context:
+
+- Fetch at most the last 10 Slack replies.
+- Exclude bot messages and messages from Memory Claw.
+- Strip Memory Claw mention tokens.
+- Cap total human thread context at 2,000 characters.
+- Prefer the most recent messages when trimming is needed.
+
+This keeps prompts small, avoids repeating bot output back into the model, and makes retrieval/composition use the same context window.
 
 ## Ollama Composition
 
@@ -205,7 +246,7 @@ Use the existing Ollama dependency already used for embeddings. Add config:
 
 ```python
 RESPONSE_MODEL = os.getenv("RESPONSE_MODEL", "qwen2.5:7b-instruct")
-RESPONSE_TIMEOUT_SECONDS = float(os.getenv("RESPONSE_TIMEOUT_SECONDS", "8"))
+RESPONSE_TIMEOUT_SECONDS = float(os.getenv("RESPONSE_TIMEOUT_SECONDS", "15"))
 ```
 
 Prompt rules:
@@ -228,6 +269,8 @@ If model generation fails, times out, or returns empty text, use deterministic f
 
 - Toggle command parse failure: ignore and continue normal search.
 - Source policy file missing or malformed: treat all sources as `restricted` and log a warning.
+- Source display command with no remembered source list: reply with a short "I do not have a recent source list for this thread" message.
+- Full-source command inside cooldown: reply with a short cooldown message and do not repost the document.
 - Ollama unavailable: fallback composer, no crash.
 - `search_memory` failure: existing listener error behavior remains.
 - Slack post failure: existing listener error behavior remains.
@@ -240,10 +283,12 @@ Add focused unit tests:
 - `detect_response_intent()` recognizes advice questions.
 - `detect_response_intent()` recognizes precedent comparison requests.
 - `detect_thread_advice_command()` parses `advice on`, `advice off`, and `advice offer`.
+- Short `yes`/`no` replies only change advice mode when `thread_advice_offer_pending` is set for that thread.
 - Toggle command updates `ListenerState.thread_advice_modes` and does not call `search_memory`.
 - Advice mode `off` omits suggested next move.
 - Advice mode `on` includes suggested next move when composer fallback is used.
-- Advice mode `offer` adds offer line for decision-sensitive context.
+- Advice mode `offer` adds the action footer only once per active thread.
+- Thread context sent to the composer is capped at 10 human messages and 2,000 characters.
 - Precedent responses include closest precedent, similarity, difference, and lesson sections.
 - Composer fallback includes filenames and scores.
 - `restricted` sources are removed before composer sees them.
@@ -252,7 +297,9 @@ Add focused unit tests:
 - `excerpt` sources allow `show source N`.
 - `share` sources allow `show full source N` only on explicit request.
 - Action footer only includes commands allowed by source policy and advice mode.
+- `show full source N` observes the per-thread cooldown.
 - Listener audit logs include `response_intent` and `advice_mode`.
+- Full mocked integration test covers event handling through toggle check, search, source policy filtering, composition fallback, Slack post, and audit metadata.
 
 ## Acceptance Criteria
 
@@ -261,7 +308,9 @@ Add focused unit tests:
 - "compare this to precedent" produces a concise comparison between the current situation and closest prior relevant memory.
 - `advice off` in a thread disables suggestions for that thread.
 - `advice on` in a thread enables suggestions for that thread.
+- Short `yes` does not enable advice unless the bot just offered advice in that thread.
 - Source citations remain visible in Slack.
 - Full document output is available only for `share` sources and only after `show full source N`.
 - `restricted` sources never appear in Slack replies or LLM prompts.
+- Action footer appears on the first useful bot reply in a thread, then stays quiet for repeated replies.
 - Tests pass with Ollama mocked; feature remains usable when generation fails.
