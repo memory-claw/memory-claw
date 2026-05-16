@@ -125,13 +125,52 @@ Check the Slack channel for the message.
 
 Without this, the listener and OpenClaw search return no hits.
 
-## Step 9: Start the Slack Listener
+## Step 9: Start the Slack Listener (required for @mentions)
+
+`./bin/imem send-slack` posts messages **without** the listener. **@mentions only work** while `scripts/slack_listener.py` is running (Socket Mode + `SLACK_APP_TOKEN`).
+
+Check status anytime:
 
 ```bash
-~/.local/bin/uv run python scripts/slack_listener.py
+~/.local/bin/uv run python scripts/slack_listener_status.py
 ```
 
-Requires both `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` to be set (not placeholders).
+Exit code `0` = listener process running; `1` = not running.
+
+### Option A — systemd user service (recommended)
+
+Stop any tmux/foreground listener first (only one instance).
+
+```bash
+pkill -f 'python3 scripts/slack_listener.py' || true
+tmux kill-session -t slack 2>/dev/null || true
+
+mkdir -p ~/.config/systemd/user
+cp deploy/systemd/memory-claw-slack-listener.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now memory-claw-slack-listener.service
+loginctl enable-linger "$USER"   # keeps service up after logout
+systemctl --user status memory-claw-slack-listener.service
+```
+
+Logs: `journalctl --user -u memory-claw-slack-listener.service -f`
+
+Restart after `.env` changes: `systemctl --user restart memory-claw-slack-listener.service`
+
+### Option B — helper script (background, no systemd)
+
+```bash
+./scripts/start_slack_listener.sh
+```
+
+### Option C — tmux (manual)
+
+```bash
+tmux new -s slack
+cd ~/memory-claw
+~/.local/bin/uv run python scripts/slack_listener.py
+# Detach: Ctrl+b then d  (do NOT Ctrl+C — that stops @mention replies)
+```
 
 The listener ingests messages into `company/inbox/slack/` and runs the answer loop (search + in-thread replies on @mention).
 
@@ -139,7 +178,41 @@ Verify Slack tokens:
 
 ```bash
 ~/.local/bin/uv run python scripts/dgx_check.py --skip-backup-video --check-slack-ingestion
+~/.local/bin/uv run python scripts/slack_setup_verify.py
 ```
+
+## Step 10: Manual Slack tests (mock corpus)
+
+Channel: **`#institutional-memory`**. Use a real @mention (pick **@Memory Claw** from autocomplete — blue highlight).
+
+| ID | What to post | Pass |
+|----|----------------|------|
+| G1 | @Memory Claw … Vantara deal, loop engineering after signed, 8 weeks | Thread reply; sources under `company/corpus/mock_data/...` (Helix/Vantara) |
+| G2 | @Memory Claw … add rate limiting after launch | Rate limit / export outage docs |
+| G3 | @Memory Claw … send them our `.env` | Secrets / credentials incident |
+| G4 | @Memory Claw random xyz123 | “didn't find anything relevant” |
+| N1 | Dark mode opinion (**no** @bot) | **No** reply |
+
+CLI preflight:
+
+```bash
+./bin/imem search-memory --query "Vantara enterprise deal loop in engineering"
+~/.local/bin/uv run python scripts/slack_listener_status.py
+~/.local/bin/uv run python scripts/golden_listener_simulate.py   # handler dry-run (no Slack post)
+tail -5 audit_log.jsonl   # expect listener_reply after each @mention test
+```
+
+Demo lines: see `company/corpus/mock_data/README.md`.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|--------|-----|
+| `send-slack` works, @mention silent | Listener not running | `systemctl --user start memory-claw-slack-listener` or `./scripts/start_slack_listener.sh` |
+| Listener was running, then stopped | Ctrl+C in tmux/terminal | Use systemd or tmux detach (`Ctrl+b` `d`) |
+| `slack_listener_status` shows multiple PIDs | Duplicate listeners | `pkill -f 'python3 scripts/slack_listener.py'`; start one via systemd |
+| No events at all | Missing `app_mention` bot event | Slack app → Event Subscriptions → add `app_mention`, `message.channels`, reinstall |
+| “didn't find anything” on good questions | Stale index | `uv run python scripts/ingest_corpus.py --force` |
 
 ## Important Warnings
 

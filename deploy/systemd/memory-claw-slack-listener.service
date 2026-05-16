@@ -1,0 +1,15 @@
+[Unit]
+Description=Memory Claw Slack Socket Mode listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/asus/memory-claw
+EnvironmentFile=/home/asus/memory-claw/.env
+ExecStart=/home/asus/.local/bin/uv run python scripts/slack_listener.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
