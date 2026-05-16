@@ -15,11 +15,18 @@ from institutional_memory.config import (
     UNPROMPTED_THRESHOLD,
 )
 from institutional_memory.response_composer import (
+    compose_slack_answer,
+    detect_response_intent,
     detect_thread_advice_command,
     should_accept_advice_offer,
 )
 from institutional_memory.search import search_memory
-from institutional_memory.source_policy import parse_source_command, render_source_command
+from institutional_memory.source_policy import (
+    apply_source_policy,
+    load_source_policy,
+    parse_source_command,
+    render_source_command,
+)
 
 
 def should_skip(event: dict[str, Any], bot_user_id: str) -> bool:
@@ -395,8 +402,30 @@ def handle_listener_event(
         log_event("listener_skip", channel=channel, reason="below_threshold", top_score=0)
         return {"status": "skipped", "reason": "below_threshold"}
 
+    policy = load_source_policy()
+    visible_hits = apply_source_policy(hits, policy)
+    if not visible_hits:
+        log_event(
+            "listener_skip",
+            channel=channel,
+            reason="source_policy_filtered",
+            top_score=hits[0]["score"],
+        )
+        return {"status": "skipped", "reason": "source_policy_filtered"}
+
     triggered_by = "mention" if is_mention else ("thread" if is_active_thread else "unprompted")
-    reply_text = format_reply(hits)
+    intent = detect_response_intent(command_text)
+    advice_mode = state.thread_advice_modes.get(key, "offer")
+    include_footer = advice_mode == "offer" and key not in state.thread_footer_shown
+    thread_context = build_thread_context(event, bot_user_id=state.bot_user_id, client=client)
+    thread_text = f"{thread_context}\n\n{command_text}".strip() if thread_context else command_text
+    reply_text = compose_slack_answer(
+        thread_text,
+        visible_hits,
+        intent=intent,
+        advice_mode=advice_mode,
+        include_footer=include_footer,
+    )
 
     try:
         client.chat_postMessage(channel=channel, text=reply_text, thread_ts=thread_ts)
@@ -405,7 +434,12 @@ def handle_listener_event(
         return {"status": "error", "error": str(exc)}
 
     state.active_threads.add((channel, thread_ts))
-    sources = [h["source"] for h in hits[:MAX_HITS]]
+    state.thread_source_refs[key] = visible_hits[:MAX_HITS]
+    if include_footer:
+        state.thread_footer_shown.add(key)
+        if '"advice"' in reply_text:
+            state.thread_advice_offer_pending.add(key)
+    sources = [h["source"] for h in visible_hits[:MAX_HITS]]
     log_event(
         "listener_reply",
         channel=channel,
@@ -414,5 +448,7 @@ def handle_listener_event(
         top_score=hits[0]["score"],
         sources=sources,
         triggered_by=triggered_by,
+        response_intent=intent,
+        advice_mode=advice_mode,
     )
     return {"status": "replied", "hits": len(hits), "triggered_by": triggered_by}

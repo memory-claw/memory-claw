@@ -1,6 +1,8 @@
 import time
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from institutional_memory.listener import (
     DedupeSet,
     ListenerState,
@@ -369,6 +371,144 @@ class MockWebClient:
 
     def conversations_replies(self, channel, ts, limit=10):
         return {"messages": []}
+
+
+class FakePolicy:
+    def __init__(self, access_by_source, default="restricted"):
+        self._access_by_source = access_by_source
+        self._default = default
+
+    def access_for(self, source):
+        return self._access_by_source.get(source, self._default)
+
+
+@pytest.fixture(autouse=True)
+def _share_source_policy_by_default():
+    with patch(
+        "institutional_memory.listener.load_source_policy",
+        return_value=FakePolicy({}, default="share"),
+    ):
+        yield
+
+
+def test_handle_reply_uses_policy_and_composer_fallback():
+    state = _make_state()
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "<@UBOT> What was our Q3 strategy?",
+    }
+    allowed = "company/corpus/allowed.md"
+    hidden = "company/corpus/hidden.md"
+    hits = [
+        {"score": 0.85, "text": "Allowed memory", "source": allowed},
+        {"score": 0.84, "text": "Hidden memory", "source": hidden},
+    ]
+    policy = FakePolicy({allowed: "share", hidden: "restricted"})
+
+    with patch("institutional_memory.listener.search_memory", return_value=hits):
+        with patch("institutional_memory.listener.load_source_policy", return_value=policy, create=True):
+            with patch(
+                "institutional_memory.listener.compose_slack_answer",
+                return_value="Allowed memory\n\nSources:\n1. allowed.md",
+                create=True,
+            ) as compose:
+                with patch("institutional_memory.listener.log_event"):
+                    result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert "Allowed" in client.posted[0]["text"]
+    assert "Hidden" not in client.posted[0]["text"]
+    compose.assert_called_once()
+    assert state.thread_source_refs[("C100", "1.0")][0]["source"] == allowed
+    assert all(ref["source"] != hidden for ref in state.thread_source_refs[("C100", "1.0")])
+
+
+def test_offer_footer_shown_once_and_sets_pending_offer():
+    state = _make_state()
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "What was our Q3 strategy?",
+    }
+    hits = [{"score": 0.85, "text": "Allowed memory", "source": "company/corpus/allowed.md"}]
+    policy = FakePolicy({"company/corpus/allowed.md": "share"})
+
+    def fake_compose(thread_text, visible_hits, *, intent=None, advice_mode="offer", include_footer=False):
+        assert include_footer is True
+        return 'Allowed memory\n\nNext: reply "advice".'
+
+    with patch("institutional_memory.listener.search_memory", return_value=hits):
+        with patch("institutional_memory.listener.load_source_policy", return_value=policy, create=True):
+            with patch(
+                "institutional_memory.listener.compose_slack_answer",
+                side_effect=fake_compose,
+                create=True,
+            ):
+                with patch("institutional_memory.listener.log_event"):
+                    result = handle_listener_event(event, client, state)
+
+    key = ("C100", "1.0")
+    assert result["status"] == "replied"
+    assert key in state.thread_footer_shown
+    assert key in state.thread_advice_offer_pending
+
+
+def test_show_source_after_normal_reply_uses_policy_filtered_refs_without_search():
+    state = _make_state()
+    client = MockWebClient()
+    allowed = "company/corpus/allowed.md"
+    hidden = "company/corpus/hidden.md"
+    hits = [
+        {"score": 0.85, "text": "Allowed memory", "source": allowed},
+        {"score": 0.84, "text": "Hidden memory", "source": hidden},
+    ]
+    policy = FakePolicy({allowed: "share", hidden: "restricted"})
+    normal_event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "What was our Q3 strategy?",
+    }
+    source_event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "user": "U123",
+        "text": "show source 1",
+    }
+
+    with patch("institutional_memory.listener.search_memory", return_value=hits) as search_memory:
+        with patch("institutional_memory.listener.load_source_policy", return_value=policy, create=True):
+            with patch(
+                "institutional_memory.listener.compose_slack_answer",
+                return_value="Allowed memory\n\nSources:\n1. allowed.md",
+                create=True,
+            ):
+                with patch("institutional_memory.listener.log_event"):
+                    normal_result = handle_listener_event(normal_event, client, state)
+
+    assert normal_result["status"] == "replied"
+    assert [ref["source"] for ref in state.thread_source_refs[("C100", "1.0")]] == [allowed]
+
+    with patch("institutional_memory.listener.search_memory") as second_search:
+        with patch("institutional_memory.source_policy.load_source_policy", return_value=policy):
+            with patch("institutional_memory.listener.log_event"):
+                source_result = handle_listener_event(source_event, client, state)
+
+    assert source_result["status"] == "replied"
+    assert "Allowed memory" in client.posted[-1]["text"]
+    assert "Hidden" not in client.posted[-1]["text"]
+    search_memory.assert_called_once()
+    second_search.assert_not_called()
 
 
 def test_handle_unprompted_hit_replies_in_thread():
