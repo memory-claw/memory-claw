@@ -39,6 +39,7 @@ if [ -n "${SLACK_BOT_TOKEN:-}" ] || [ -n "${SLACK_CHANNEL:-}" ] || [ -n "$SLACK_
     printf 'SLACK_BOT_TOKEN=%s\n' "$SLACK_BOT_TOKEN"
     printf 'SLACK_CHANNEL=%s\n' "$SLACK_CHANNEL"
     printf 'SLACK_WEBHOOK_URL=%s\n' "$SLACK_WEBHOOK_URL"
+    printf 'SLACK_APP_TOKEN=%s\n' "${SLACK_APP_TOKEN:-}"
   } >"$REMOTE_ENV_FILE"
   ssh -i "$ASUS_SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ASUS_USER_HOST" \
     "set -eu; PATH=\$HOME/.local/bin:\$PATH; cd $ASUS_REPO; umask 077; cat > .env" <"$REMOTE_ENV_FILE"
