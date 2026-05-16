@@ -47,3 +47,5 @@ def test_readme_documents_asus_push_deploy():
     assert "OpenClaw workspace" in readme
     assert "TS_OAUTH_CLIENT_ID" in readme
     assert "tailscale ping 100.68.221.47" in readme
+    assert "shared machine" in readme
+    assert "tagged GitHub Actions node" in readme
