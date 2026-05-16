@@ -17,7 +17,7 @@ from institutional_memory.config import (
     RUNTIME_PATH,
 )
 from institutional_memory.drafts import list_new_drafts, read_draft
-from institutional_memory.paths import PathNotAllowedError
+from institutional_memory.paths import PathNotAllowedError, safe_inbox_path
 from institutional_memory.state import mark_as_processed, reset_processed
 
 PROCESSED_STATUSES = {
@@ -68,6 +68,11 @@ def cmd_read_draft(args: argparse.Namespace) -> int:
 def cmd_mark_processed(args: argparse.Namespace) -> int:
     if args.status not in PROCESSED_STATUSES:
         return _emit_error(f"invalid status: {args.status}", path=args.path)
+    try:
+        safe_path = safe_inbox_path(args.path)
+        rel_path = str(safe_path.relative_to(PROJECT_ROOT))
+    except (PathNotAllowedError, ValueError) as exc:
+        return _emit_error(f"mark failed: {exc}", "processed", path=args.path)
     fields = {
         "status": args.status,
         "reason": args.reason,
@@ -76,9 +81,9 @@ def cmd_mark_processed(args: argparse.Namespace) -> int:
         "source": args.source,
         "processed_at": datetime.now(timezone.utc).isoformat(),
     }
-    mark_as_processed(args.path, **{k: v for k, v in fields.items() if v is not None})
-    log_event("processed", path=args.path, **fields)
-    emit({"status": args.status, "path": args.path})
+    mark_as_processed(rel_path, **{k: v for k, v in fields.items() if v is not None})
+    log_event("processed", path=rel_path, **fields)
+    emit({"status": args.status, "path": rel_path})
     return 0
 
 

@@ -19,13 +19,16 @@ from institutional_memory.config import (
 
 
 def run(*command: str, timeout: int = 120) -> tuple[int, str]:
-    result = subprocess.run(
-        command,
-        cwd=PROJECT_ROOT,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return 124, f"timeout after {timeout}s: {' '.join(command)}"
     return result.returncode, result.stdout + result.stderr
 
 

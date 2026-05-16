@@ -26,6 +26,19 @@ def test_read_draft_blocks_traversal_with_json_error():
     assert "error" in payload
 
 
+def test_mark_processed_blocks_traversal_with_json_error():
+    payload = run_imem(
+        "mark-processed",
+        "--path",
+        "../etc/passwd",
+        "--status",
+        "tool_error",
+        "--reason",
+        "bad path",
+    )
+    assert "error" in payload
+
+
 def test_reset_demo_outputs_json():
     payload = run_imem("reset-demo", "--clear-audit")
     assert payload["status"] == "reset"
