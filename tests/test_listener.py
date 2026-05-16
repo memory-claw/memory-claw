@@ -513,6 +513,54 @@ def test_short_yes_after_pending_offer_sets_advice_on_without_search():
     search_memory.assert_not_called()
 
 
+def test_short_bot_reply_in_active_thread_still_filtered():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    state.thread_advice_offer_pending.add(("C100", "1.0"))
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "bot_id": "B123",
+        "text": "yes",
+    }
+
+    with patch("institutional_memory.listener.search_memory") as search_memory:
+        result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "filtered"
+    assert state.thread_advice_modes == {}
+    search_memory.assert_not_called()
+
+
+def test_advice_command_post_failure_does_not_mutate_mode():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    state.thread_advice_offer_pending.add(("C100", "1.0"))
+    client = MockWebClient()
+    client.chat_postMessage = MagicMock(side_effect=Exception("Slack down"))
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "user": "U123",
+        "text": "yes",
+    }
+
+    with patch("institutional_memory.listener.search_memory") as search_memory:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "error"
+    assert state.thread_advice_modes == {}
+    assert ("C100", "1.0") in state.thread_advice_offer_pending
+    search_memory.assert_not_called()
+
+
 def test_handle_search_failure_no_crash():
     state = _make_state()
     client = MockWebClient()

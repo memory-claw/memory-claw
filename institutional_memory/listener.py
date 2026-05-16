@@ -253,12 +253,16 @@ def _handle_advice_mode_command(
             text,
             pending_offer=key in state.thread_advice_offer_pending,
         )
-    if mode is None:
-        return None
+    return mode
 
+
+def _commit_advice_mode(
+    mode: str,
+    key: tuple[str, str],
+    state: ListenerState,
+) -> None:
     state.thread_advice_modes[key] = mode
     state.thread_advice_offer_pending.discard(key)
-    return _advice_mode_reply(mode)
 
 
 def handle_listener_event(
@@ -274,6 +278,8 @@ def handle_listener_event(
     is_active_thread = _thread_key(channel, str(event.get("thread_ts", ""))) in state.active_threads
     is_short_active_thread_reply = is_active_thread and len(str(event.get("text", "")).strip()) < 5
 
+    if event.get("bot_id") or event.get("user") == state.bot_user_id or event.get("subtype"):
+        return {"status": "skipped", "reason": "filtered"}
     if should_skip(event, state.bot_user_id) and not is_short_active_thread_reply:
         return {"status": "skipped", "reason": "filtered"}
 
@@ -286,10 +292,12 @@ def handle_listener_event(
 
     key = _thread_key(channel, str(thread_ts))
     command_text = strip_mention(str(event.get("text", "")), state.bot_user_id)
-    advice_reply = _handle_advice_mode_command(command_text, key, state)
-    if advice_reply:
+    advice_mode = _handle_advice_mode_command(command_text, key, state)
+    if advice_mode:
+        advice_reply = _advice_mode_reply(advice_mode)
         try:
             client.chat_postMessage(channel=channel, text=advice_reply, thread_ts=thread_ts)
+            _commit_advice_mode(advice_mode, key, state)
             log_event(
                 "listener_reply",
                 channel=channel,
@@ -299,7 +307,7 @@ def handle_listener_event(
                 sources=[],
                 triggered_by="thread",
                 response_intent="toggle",
-                advice_mode=state.thread_advice_modes[key],
+                advice_mode=advice_mode,
             )
             return {"status": "replied", "hits": 0, "triggered_by": "thread"}
         except Exception as exc:
