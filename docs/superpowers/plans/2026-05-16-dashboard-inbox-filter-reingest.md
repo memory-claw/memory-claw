@@ -1,41 +1,53 @@
-# Dashboard Inbox Filter and Re-ingest Implementation Plan
+# Dashboard Inbox Filter and Re-ingest Fix
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers-extended-cc:subagent-driven-development (recommended) or superpowers-extended-cc:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add client-side inbox type filtering/search on both dashboard inbox surfaces and fix the dashboard re-ingest endpoint/button.
+**Goal:** Add client-side inbox search/filter on both dashboard surfaces and harden the re-ingest endpoint with error handling.
 
-**Architecture:** Keep filtering/search in static browser code with no new inbox API calls. Add small backend helpers in `dashboard/app.py` for document type metadata and path-only Chroma skip semantics before ingesting new corpus files. Preserve existing source IDs by ingesting new files with exported ingest primitives from `institutional_memory.ingest`; the endpoint must not call `ingest_folder()`.
+**Architecture:** Extend existing `_infer_tag` to cover all document types (adding `draft` and `other`). Expose `type` field on inbox API items. Client-side JS filters/search on both pages using shared CSS loaded from a single file. Re-ingest keeps existing `ingest_folder()` — just add `try/except` and `ok` field.
 
-**Tech Stack:** FastAPI, plain HTML/CSS/JavaScript, ChromaDB collection API, pytest.
+**Tech Stack:** FastAPI, plain HTML/CSS/JavaScript, pytest.
 
 ---
 
 ## File Structure
 
 - Modify `dashboard/app.py`
-  - Add document type inference helper for inbox data.
-  - Add Chroma source extraction and single-file corpus ingest helper.
-  - Replace `api_run_ingest()` with JSON success/error behavior.
+  - Rename `_infer_tag` → `_infer_document_type`, add `draft` and `other` returns.
+  - Add `type` field to `_inbox_item()` return dict.
+  - Wrap `api_run_ingest()` in try/except, add `ok` field to response.
+- Create `dashboard/static/controls.css`
+  - Shared search input, filter button, and clear button styles.
 - Modify `dashboard/static/index.html`
-  - Add inbox search and type filter controls.
-  - Add client-side filter state, debounce, clear button, and row `data-*` attributes.
-  - Update re-ingest button status behavior.
+  - Link `controls.css`. Add search/filter markup and JS. Add `data-type`/`data-search` to inbox rows.
+  - Upgrade `runReingest()` to handle `ok: false` with red error text.
 - Modify `dashboard/static/inbox.html`
-  - Add same search/filter controls for full inbox cards.
-  - Add card `data-*` attributes and filtered empty state.
+  - Link `controls.css`. Add search/filter markup and JS. Add `data-type`/`data-search` to draft cards.
 - Create `tests/test_dashboard.py`
-  - Test document type inference.
-  - Test Chroma source extraction.
-  - Test re-ingest skips existing source paths.
-  - Test re-ingest error payload.
+  - Test `_infer_document_type` covers all types including new `draft` and `other`.
+  - Test `api_run_ingest` error payload.
 
-## Task 1: Backend Helpers and Re-ingest Endpoint
+## Task 1: Backend — Document Type and Re-ingest Error Handling
+
+**Goal:** Extend `_infer_tag` to return all document types, expose `type` on inbox items, and add error handling to re-ingest endpoint.
 
 **Files:**
-- Modify: `dashboard/app.py`
+- Modify: `dashboard/app.py:332-344` (`_infer_tag`), `dashboard/app.py:478-492` (`_inbox_item`), `dashboard/app.py:713-737` (`api_run_ingest`)
 - Create: `tests/test_dashboard.py`
 
-- [ ] **Step 1: Write failing backend tests**
+**Acceptance Criteria:**
+- [ ] `_infer_document_type("company/inbox/draft_notes.md")` returns `"draft"`
+- [ ] `_infer_document_type("company/inbox/lunch.md")` returns `"other"`
+- [ ] `_infer_document_type("company/inbox/security_policy.md")` returns `"policy"`
+- [ ] Inbox API items include `"type"` key
+- [ ] Re-ingest returns `{"ok": true, ...}` on success
+- [ ] Re-ingest returns `{"ok": false, "error": "..."}` when Chroma/Ollama is down
+
+**Verify:** `uv run pytest tests/test_dashboard.py -v`
+
+**Steps:**
+
+- [ ] **Step 1: Write tests**
 
 Create `tests/test_dashboard.py`:
 
@@ -43,22 +55,7 @@ Create `tests/test_dashboard.py`:
 import dashboard.app as dashboard_app
 
 
-class FakeCollection:
-    def __init__(self, ids=None, fail_get=False):
-        self.ids = ids or []
-        self.fail_get = fail_get
-        self.add_calls = []
-
-    def get(self, include=None, **kwargs):
-        if self.fail_get:
-            raise RuntimeError("chroma offline")
-        return {"ids": self.ids}
-
-    def add(self, **kwargs):
-        self.add_calls.append(kwargs)
-
-
-def test_infer_document_type_matches_required_precedence():
+def test_infer_document_type_all_categories():
     cases = {
         "company/inbox/security_policy.md": "policy",
         "company/inbox/api_incident.md": "postmortem",
@@ -69,93 +66,42 @@ def test_infer_document_type_matches_required_precedence():
         "company/inbox/lunch_notes.md": "other",
     }
     for path, expected in cases.items():
-        assert dashboard_app._infer_document_type(path) == expected
+        assert dashboard_app._infer_document_type(path) == expected, f"{path} → expected {expected}"
 
 
-def test_existing_chroma_sources_parse_chunk_ids():
-    collection = FakeCollection(
-        ids=[
-            "company/corpus/source.txt:0:0",
-            "company/corpus/mock_data/postmortems/source.md:350:1",
-            "malformed",
-        ]
+def test_run_ingest_returns_ok_field(monkeypatch):
+    monkeypatch.setattr(
+        dashboard_app,
+        "ingest_folder",
+        lambda folder, force: {"files": 0, "chunks": 0},
     )
-
-    assert dashboard_app._existing_chroma_sources(collection) == {
-        "company/corpus/source.txt",
-        "company/corpus/mock_data/postmortems/source.md",
-    }
-
-
-def test_run_ingest_skips_sources_already_in_chroma(tmp_path, monkeypatch):
-    corpus = tmp_path / "company" / "corpus"
-    corpus.mkdir(parents=True)
-    existing = corpus / "existing.txt"
-    existing.write_text(" ".join(f"old{i}" for i in range(20)), encoding="utf-8")
-    new = corpus / "new_policy.txt"
-    new.write_text(" ".join(f"new{i}" for i in range(20)), encoding="utf-8")
-    registry = {}
-    collection = FakeCollection(ids=["company/corpus/existing.txt:0:0"])
-
-    monkeypatch.setattr(dashboard_app, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(dashboard_app, "COMPANY_CORPUS_PATH", corpus)
-    monkeypatch.setattr(dashboard_app, "get_chroma_collection", lambda: collection)
-    monkeypatch.setattr(dashboard_app, "embed_text", lambda text: [0.1, 0.2, 0.3])
-    monkeypatch.setattr(dashboard_app, "_load_ingested", lambda: registry)
-    monkeypatch.setattr(dashboard_app, "_save_ingested", lambda data: registry.update(data))
+    monkeypatch.setattr(dashboard_app, "_load_ingested", lambda: {})
+    monkeypatch.setattr(dashboard_app, "_list_corpus_paths", lambda: [])
 
     result = dashboard_app.api_run_ingest()
-
     assert result["ok"] is True
-    assert result["added"] == 1
-    assert result["skipped"] == 1
-    assert result["files_added"] == ["company/corpus/new_policy.txt"]
-    assert result["chunks"] == 1
-    assert len(collection.add_calls) == 1
-    assert collection.add_calls[0]["metadatas"][0]["source"] == "company/corpus/new_policy.txt"
 
 
-def test_run_ingest_returns_error_payload_when_chroma_fails(monkeypatch):
-    collection = FakeCollection(fail_get=True)
-    monkeypatch.setattr(dashboard_app, "get_chroma_collection", lambda: collection)
+def test_run_ingest_returns_error_on_exception(monkeypatch):
+    def boom(*a, **kw):
+        raise RuntimeError("chroma offline")
+
+    monkeypatch.setattr(dashboard_app, "_load_ingested", boom)
 
     result = dashboard_app.api_run_ingest()
-
     assert result["ok"] is False
     assert "chroma offline" in result["error"]
 ```
 
-- [ ] **Step 2: Run backend tests to verify they fail**
+- [ ] **Step 2: Run tests — confirm they fail**
 
-Run:
+Run: `uv run pytest tests/test_dashboard.py -v`
 
-```bash
-uv run pytest tests/test_dashboard.py -v
-```
+Expected: FAIL — `_infer_document_type` doesn't exist, `api_run_ingest` doesn't return `ok`, no try/except.
 
-Expected: FAIL because `_infer_document_type`, `_existing_chroma_sources`, and new endpoint behavior do not exist yet.
+- [ ] **Step 3: Rename `_infer_tag` → `_infer_document_type` and add cases**
 
-- [ ] **Step 3: Update imports in `dashboard/app.py`**
-
-Change the ingest import block near the top of `dashboard/app.py` to include the exported primitives used by the new helper:
-
-```python
-from institutional_memory.documents import load_document_text
-from institutional_memory.ingest import (
-    _fingerprint,
-    _load_ingested,
-    _save_ingested,
-    chunk_text,
-    embed_text,
-    get_chroma_collection,
-)
-```
-
-Do not import or call `ingest_folder()` from `dashboard/app.py`; the endpoint needs per-file path filtering before Chroma writes.
-
-- [ ] **Step 4: Add document type helper in `dashboard/app.py`**
-
-Add this helper above `_infer_tag`:
+In `dashboard/app.py`, replace `_infer_tag` (line 332) with:
 
 ```python
 def _infer_document_type(rel_path: str) -> str:
@@ -175,256 +121,240 @@ def _infer_document_type(rel_path: str) -> str:
     return "other"
 ```
 
-Update `_infer_tag()` to preserve existing corpus behavior for non-matching documents:
+Update all call sites of `_infer_tag` to use `_infer_document_type`. Grep for `_infer_tag` — it's called in `_corpus_item()` and possibly other corpus-related functions. Those callers previously got `"doc"` for unmatched files; now they get `"other"`. If any caller needs the old `"doc"` value, map it: but check first — the CSS class `.tag.doc` exists in `index.html`, so either add `.tag.other` CSS or keep returning `"doc"` for corpus items specifically.
+
+**Resolution:** The simplest approach — `_infer_document_type` returns the canonical type. For corpus tag display, the caller maps `"other"` → `"doc"`:
+
+Find every call site of `_infer_tag` and replace with `_infer_document_type`. In the corpus item builder where it sets `"tag"`, use:
 
 ```python
-def _infer_tag(rel_path: str) -> str:
-    tag = _infer_document_type(rel_path)
-    return "doc" if tag == "other" else tag
+doc_type = _infer_document_type(rel)
+"tag": "doc" if doc_type == "other" else doc_type,
 ```
 
-- [ ] **Step 5: Add `type` to inbox API items**
+This preserves existing `.tag.doc` CSS without adding a new class.
 
-In `_inbox_item()`, add this key to the returned dict:
+- [ ] **Step 4: Add `type` to `_inbox_item` return dict**
+
+In `_inbox_item()` (line 478), add to the returned dict:
 
 ```python
 "type": _infer_document_type(rel_path),
 ```
 
-Place it near `"status": status` so UI data is easy to inspect.
+Place it after the `"status"` key.
 
-- [ ] **Step 6: Add Chroma source and ingest helpers**
+- [ ] **Step 5: Wrap `api_run_ingest` in try/except, add `ok` field**
 
-Add these helpers above `api_run_ingest()` in `dashboard/app.py`:
-
-```python
-def _source_from_chunk_id(chunk_id: str) -> str | None:
-    parts = chunk_id.rsplit(":", 2)
-    if len(parts) != 3:
-        return None
-    source, start_word, index = parts
-    if not source or not start_word.isdigit() or not index.isdigit():
-        return None
-    return source
-
-
-def _existing_chroma_sources(collection: Any) -> set[str]:
-    result = collection.get(include=[])
-    ids = result.get("ids") or []
-    sources: set[str] = set()
-    for chunk_id in ids:
-        source = _source_from_chunk_id(str(chunk_id))
-        if source:
-            sources.add(source)
-    return sources
-
-
-def _ingest_corpus_file(path: Path, collection: Any, registry: dict[str, str]) -> dict[str, Any]:
-    rel = str(path.resolve().relative_to(PROJECT_ROOT))
-    text = load_document_text(path)
-    file_chunks = chunk_text(text, rel)
-    if not file_chunks:
-        return {"file": rel, "chunks": 0, "ingested": False}
-
-    collection.add(
-        ids=[chunk["id"] for chunk in file_chunks],
-        embeddings=[embed_text(chunk["text"]) for chunk in file_chunks],
-        documents=[chunk["text"] for chunk in file_chunks],
-        metadatas=[
-            {
-                "source": chunk["source"],
-                "start_word": chunk["start_word"],
-                "index": chunk["index"],
-            }
-            for chunk in file_chunks
-        ],
-    )
-    registry[rel] = _fingerprint(path)
-    return {"file": rel, "chunks": len(file_chunks), "ingested": True}
-```
-
-- [ ] **Step 7: Replace `api_run_ingest()`**
-
-Replace the existing endpoint body with:
+Replace `api_run_ingest()` body (line 714) with:
 
 ```python
 @app.post("/api/run/ingest")
 def api_run_ingest() -> dict[str, Any]:
     try:
-        collection = get_chroma_collection()
-        existing_sources = _existing_chroma_sources(collection)
-        registry = _load_ingested()
-
-        files_added: list[str] = []
-        chunks = 0
+        registry_before = dict(_load_ingested())
+        eligible = _list_corpus_paths()
         skipped = 0
-
-        for path in _list_corpus_paths():
+        for path in eligible:
             rel = str(path.resolve().relative_to(PROJECT_ROOT))
-            if rel in existing_sources:
+            if registry_before.get(rel) == _fingerprint(path):
                 skipped += 1
-                continue
-            result = _ingest_corpus_file(path, collection, registry)
-            if result["ingested"]:
-                files_added.append(str(result["file"]))
-                chunks += int(result["chunks"])
 
-        _save_ingested(registry)
+        result = ingest_folder(COMPANY_CORPUS_PATH, force=False)
+        registry_after = _load_ingested()
+        files_added = [
+            rel
+            for rel, fp in registry_after.items()
+            if registry_before.get(rel) != fp
+        ]
+
         return {
             "ok": True,
             "added": len(files_added),
             "skipped": skipped,
             "files_added": files_added,
-            "chunks": chunks,
-            "files": len(files_added),
+            "chunks": result.get("chunks", 0),
+            "files": result.get("files", 0),
         }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 ```
 
-- [ ] **Step 8: Run backend tests**
+- [ ] **Step 6: Run tests — confirm they pass**
 
-Run:
+Run: `uv run pytest tests/test_dashboard.py -v`
 
-```bash
-uv run pytest tests/test_dashboard.py -v
-```
+Expected: all 3 PASS.
 
-Expected: PASS.
-
-- [ ] **Step 9: Commit backend work**
-
-Run:
+- [ ] **Step 7: Commit**
 
 ```bash
 git add dashboard/app.py tests/test_dashboard.py
-git commit -m "fix: reingest only new corpus sources"
+git commit -m "feat: add document type inference and reingest error handling"
 ```
 
-## Task 2: Dashboard Inbox Search and Type Filter
+## Task 2: Shared Controls CSS
+
+**Goal:** Create one CSS file for search/filter controls, linked from both dashboard pages.
+
+**Files:**
+- Create: `dashboard/static/controls.css`
+
+**Acceptance Criteria:**
+- [ ] File contains all search input, filter button, and clear button styles
+- [ ] No duplicate CSS across pages
+
+**Verify:** File exists and is valid CSS.
+
+**Steps:**
+
+- [ ] **Step 1: Create `dashboard/static/controls.css`**
+
+```css
+.inbox-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.search-wrap {
+  position: relative;
+  width: 100%;
+}
+.search-input {
+  width: 100%;
+  font-family: var(--font);
+  font-size: 12px;
+  padding: 7px 28px 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  outline: none;
+}
+.search-input:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 2px var(--teal-light);
+}
+.search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 18px;
+  display: none;
+}
+.search-clear.visible { display: block; }
+.filter-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.filter-btn {
+  font-family: var(--font);
+  font-size: 10px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--teal);
+  background: transparent;
+  color: var(--teal-dark);
+  cursor: pointer;
+}
+.filter-btn.active {
+  background: var(--teal);
+  color: #fff;
+}
+.filtered-empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 24px 12px;
+  font-size: 12px;
+}
+.ingest-status.error { color: var(--red); }
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add dashboard/static/controls.css
+git commit -m "feat: add shared controls CSS for inbox filter"
+```
+
+## Task 3: Dashboard Index — Inbox Filter/Search and Re-ingest UX
+
+**Goal:** Add search input, type filter buttons, and error-aware re-ingest to the main dashboard inbox panel.
 
 **Files:**
 - Modify: `dashboard/static/index.html`
 
-- [ ] **Step 1: Add inbox control CSS**
+**Acceptance Criteria:**
+- [ ] Search input with clear button above inbox list
+- [ ] Type filter buttons (All, Draft, Policy, Contract, RFP, Postmortem, Slack, Other)
+- [ ] Filtering hides non-matching rows, shows empty state when zero visible
+- [ ] Search debounces at 200ms
+- [ ] Re-ingest shows red error text when `ok: false`
+- [ ] Inbox rows have `data-type` and `data-search` attributes
 
-In `dashboard/static/index.html`, add this CSS after `.panel-header` styles:
+**Verify:** `uv run python -m dashboard` → open `http://127.0.0.1:7842/` → filter/search/re-ingest work.
 
-```css
-    .inbox-controls {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin: -2px 0 10px;
-    }
-    .search-wrap {
-      position: relative;
-      width: 100%;
-    }
-    .search-input {
-      width: 100%;
-      font-family: var(--font);
-      font-size: 12px;
-      padding: 7px 28px 7px 10px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--panel);
-      color: var(--text);
-      outline: none;
-    }
-    .search-input:focus {
-      border-color: var(--teal);
-      box-shadow: 0 0 0 2px var(--teal-light);
-    }
-    .search-clear {
-      position: absolute;
-      right: 6px;
-      top: 50%;
-      transform: translateY(-50%);
-      width: 18px;
-      height: 18px;
-      border: 0;
-      background: transparent;
-      color: var(--muted);
-      cursor: pointer;
-      font-family: var(--font);
-      font-size: 13px;
-      line-height: 18px;
-      display: none;
-    }
-    .search-clear.visible { display: block; }
-    .filter-bar {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-    .filter-btn {
-      font-family: var(--font);
-      font-size: 10px;
-      padding: 4px 8px;
-      border-radius: 999px;
-      border: 1px solid var(--teal);
-      background: transparent;
-      color: var(--teal-dark);
-      cursor: pointer;
-    }
-    .filter-btn.active {
-      background: var(--teal);
-      color: #fff;
-    }
+**Steps:**
+
+- [ ] **Step 1: Link shared CSS**
+
+In `<head>`, after the closing `</style>` tag, add:
+
+```html
+<link rel="stylesheet" href="/static/controls.css" />
 ```
 
-- [ ] **Step 2: Add controls markup below inbox panel header**
+- [ ] **Step 2: Add controls markup**
 
-In the inbox panel, between `</div>` for `.panel-header` and `<div class="list" id="inbox-list"></div>`, insert:
+Between the inbox `</div>` for `.panel-header` (after line 321) and `<div class="list" id="inbox-list">`, insert:
 
 ```html
           <div class="inbox-controls">
             <div class="search-wrap">
               <input class="search-input" id="inbox-search" type="search" placeholder="Search inbox..." autocomplete="off" />
-              <button class="search-clear" id="inbox-search-clear" type="button" aria-label="Clear inbox search">X</button>
+              <button class="search-clear" id="inbox-search-clear" type="button" aria-label="Clear search">X</button>
             </div>
-            <div class="filter-bar" id="inbox-filter-bar" aria-label="Inbox document type filters"></div>
+            <div class="filter-bar" id="inbox-filter-bar"></div>
           </div>
 ```
 
-- [ ] **Step 3: Add filter/search state and helpers**
+- [ ] **Step 3: Add filter/search JS state and helpers**
 
-Near the top of the `<script>` after `let auditExpanded = new Set();`, add:
+After `let auditExpanded = new Set();` (line 370), add:
 
 ```javascript
     const INBOX_FILTERS = [
-      ["all", "All"],
-      ["draft", "Draft"],
-      ["policy", "Policy"],
-      ["contract", "Contract"],
-      ["rfp", "RFP"],
-      ["postmortem", "Postmortem"],
-      ["slack", "Slack"],
-      ["other", "Other"],
+      ["all", "All"], ["draft", "Draft"], ["policy", "Policy"],
+      ["contract", "Contract"], ["rfp", "RFP"], ["postmortem", "Postmortem"],
+      ["slack", "Slack"], ["other", "Other"],
     ];
     let inboxTypeFilter = "all";
     let inboxSearchTerm = "";
     let inboxSearchTimer = null;
 ```
 
-Add these helper functions after `sourceBasename()`:
+After `sourceBasename()` function, add:
 
 ```javascript
-    function normalizeSearchText(parts) {
-      return parts
-        .filter((part) => part != null)
-        .map((part) => String(part).toLowerCase())
-        .join(" ");
-    }
-
     function renderInboxFilters() {
       document.getElementById("inbox-filter-bar").innerHTML = INBOX_FILTERS
-        .map(([value, label]) => `<button type="button" class="filter-btn ${value === inboxTypeFilter ? "active" : ""}" data-filter="${esc(value)}">${esc(label)}</button>`)
-        .join("");
+        .map(([val, label]) =>
+          `<button type="button" class="filter-btn ${val === inboxTypeFilter ? "active" : ""}" data-filter="${esc(val)}">${esc(label)}</button>`
+        ).join("");
       document.querySelectorAll("#inbox-filter-bar .filter-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
-          inboxTypeFilter = btn.getAttribute("data-filter") || "all";
+          inboxTypeFilter = btn.dataset.filter || "all";
           renderInboxFilters();
           applyInboxFilters();
         });
@@ -432,20 +362,19 @@ Add these helper functions after `sourceBasename()`:
     }
 
     function applyInboxFilters() {
-      const list = document.getElementById("inbox-list");
-      const rows = [...list.querySelectorAll(".list-item")];
+      const rows = [...document.querySelectorAll("#inbox-list .list-item")];
       let visible = 0;
       rows.forEach((row) => {
-        const typeMatches = inboxTypeFilter === "all" || row.dataset.type === inboxTypeFilter;
-        const textMatches = !inboxSearchTerm || (row.dataset.search || "").includes(inboxSearchTerm);
-        const show = typeMatches && textMatches;
-        row.hidden = !show;
-        if (show) visible += 1;
+        const typeOk = inboxTypeFilter === "all" || row.dataset.type === inboxTypeFilter;
+        const textOk = !inboxSearchTerm || (row.dataset.search || "").includes(inboxSearchTerm);
+        row.hidden = !(typeOk && textOk);
+        if (!row.hidden) visible++;
       });
-      const existingEmpty = list.querySelector(".filtered-empty");
-      if (existingEmpty) existingEmpty.remove();
-      if (rows.length && visible === 0) {
-        list.insertAdjacentHTML("beforeend", '<div class="empty filtered-empty">No inbox items match filters</div>');
+      const old = document.querySelector("#inbox-list .filtered-empty");
+      if (old) old.remove();
+      if (rows.length && !visible) {
+        document.getElementById("inbox-list").insertAdjacentHTML("beforeend",
+          '<div class="filtered-empty">No inbox items match filters</div>');
       }
     }
 
@@ -464,261 +393,139 @@ Add these helper functions after `sourceBasename()`:
         input.value = "";
         inboxSearchTerm = "";
         clear.classList.remove("visible");
-        clearTimeout(inboxSearchTimer);
         applyInboxFilters();
         input.focus();
       });
     }
 ```
 
-- [ ] **Step 4: Add row `data-type` and `data-search` attributes**
+- [ ] **Step 4: Add `data-type` and `data-search` to inbox rows**
 
-In `renderInbox(items)`, inside `.map((item) => {`, add:
+In `renderInbox(items)`, inside the `.map((item) => {` callback, add before the `return`:
 
 ```javascript
           const itemType = item.type || "other";
-          const searchText = normalizeSearchText([
-            item.path,
-            item.name,
-            item.title,
-            item.matched_source,
-            sourceBasename(item.matched_source),
-            item.summary,
-          ]);
+          const searchText = [item.path, item.name, item.title, item.matched_source, sourceBasename(item.matched_source), item.summary]
+            .filter(Boolean).map(s => String(s).toLowerCase()).join(" ");
 ```
 
-Change the returned row opening from:
+Change the row opening div from:
 
 ```javascript
-          return `<div class="list-item clickable" onclick="window.location.href='/inbox#${encodeURIComponent(item.path)}'">
+          return `<div class="list-item clickable" onclick="...">
 ```
 
 to:
 
 ```javascript
-          return `<div class="list-item clickable" data-type="${esc(itemType)}" data-search="${esc(searchText)}" onclick="window.location.href='/inbox#${encodeURIComponent(item.path)}'">
+          return `<div class="list-item clickable" data-type="${esc(itemType)}" data-search="${esc(searchText)}" onclick="...">
 ```
 
-At the end of `renderInbox(items)`, after assigning `el.innerHTML`, call:
+At the end of `renderInbox(items)`, after `el.innerHTML = ...`, add:
 
 ```javascript
       applyInboxFilters();
 ```
 
-- [ ] **Step 5: Initialize controls**
+- [ ] **Step 5: Upgrade `runReingest()` error handling**
 
-Before `refresh();` at the bottom of the script, add:
+In `runReingest()`, change the try block's fetch handling to check `ok`:
+
+```javascript
+        const response = await fetch("/api/run/ingest", { method: "POST" });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+```
+
+Change the catch block to show red error:
+
+```javascript
+      } catch (e) {
+        statusEl.classList.add("error");
+        statusEl.textContent = `✗ ${e.message || "ingest failed"}`;
+```
+
+Remove the `statusEl.classList.remove("fade")` from the existing `finally` block's first `setTimeout`, since errors should stay visible. Only fade on success.
+
+- [ ] **Step 6: Initialize controls**
+
+Before `refresh();` at end of script, add:
 
 ```javascript
     renderInboxFilters();
     setupInboxSearch();
 ```
 
-- [ ] **Step 6: Upgrade re-ingest status CSS**
-
-Replace `.ingest-status` CSS with:
-
-```css
-    .ingest-status {
-      font-size: 11px;
-      color: var(--teal-dark);
-      margin-left: 8px;
-      transition: opacity 0.4s ease;
-    }
-    .ingest-status.error { color: var(--red); }
-    .ingest-status.fade { opacity: 0; }
-    .ingest-spinner { color: var(--muted); }
-```
-
-- [ ] **Step 7: Replace `runReingest()`**
-
-Replace the whole `runReingest()` function in `index.html` with:
-
-```javascript
-    async function runReingest() {
-      const btn = document.getElementById("btn-reingest");
-      const statusEl = document.getElementById("ingest-status");
-      const frames = ["...", ".. ", ". .", "..."];
-      let frame = 0;
-      let spinnerTimer = null;
-
-      btn.disabled = true;
-      statusEl.classList.remove("fade", "error");
-      statusEl.textContent = frames[0];
-      spinnerTimer = setInterval(() => {
-        frame = (frame + 1) % frames.length;
-        statusEl.textContent = frames[frame];
-      }, 300);
-
-      try {
-        const response = await fetch("/api/run/ingest", { method: "POST" });
-        const data = await response.json();
-        if (!response.ok || data.ok === false) {
-          throw new Error(data.error || `HTTP ${response.status}`);
-        }
-        clearInterval(spinnerTimer);
-        spinnerTimer = null;
-        const added = Number(data.added || 0);
-        statusEl.textContent = `✓ ${added} doc${added === 1 ? "" : "s"} added`;
-        await Promise.all([
-          fetch("/api/stats").then((r) => r.json()).then(renderStats),
-          fetch("/api/corpus").then((r) => r.json()).then(renderCorpus),
-        ]);
-        setTimeout(() => statusEl.classList.add("fade"), 4000);
-        setTimeout(() => {
-          statusEl.textContent = "";
-          statusEl.classList.remove("fade");
-        }, 4500);
-      } catch (e) {
-        if (spinnerTimer) clearInterval(spinnerTimer);
-        statusEl.classList.add("error");
-        statusEl.classList.remove("fade");
-        statusEl.textContent = `✗ failed: ${String(e.message || e)}`;
-      } finally {
-        btn.disabled = false;
-      }
-    }
-```
-
-- [ ] **Step 8: Manual static sanity check**
-
-Run:
-
-```bash
-uv run pytest tests/test_dashboard.py -v
-```
-
-Expected: PASS, proving backend API changes still hold after static edits.
-
-- [ ] **Step 9: Commit dashboard index work**
-
-Run:
+- [ ] **Step 7: Commit**
 
 ```bash
 git add dashboard/static/index.html
-git commit -m "feat: add dashboard inbox filters"
+git commit -m "feat: add inbox search/filter and reingest error UX"
 ```
 
-## Task 3: Full Inbox Page Search and Type Filter
+## Task 4: Inbox Detail Page — Search and Type Filter
+
+**Goal:** Add same search/filter controls to full inbox page at `/inbox`.
 
 **Files:**
 - Modify: `dashboard/static/inbox.html`
 
-- [ ] **Step 1: Add controls CSS to `inbox.html`**
+**Acceptance Criteria:**
+- [ ] Search input with clear button above draft cards
+- [ ] Same type filter buttons as dashboard
+- [ ] Filtering hides non-matching cards, shows empty state
+- [ ] Draft cards have `data-type` and `data-search` attributes
 
-Add this CSS after `.page-sub`:
+**Verify:** `uv run python -m dashboard` → open `http://127.0.0.1:7842/inbox` → filter/search work.
 
-```css
-    .inbox-controls {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin-bottom: 16px;
-    }
-    .search-wrap {
-      position: relative;
-      width: 100%;
-    }
-    .search-input {
-      width: 100%;
-      font-family: var(--font);
-      font-size: 12px;
-      padding: 8px 30px 8px 10px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--panel);
-      color: var(--text);
-      outline: none;
-    }
-    .search-input:focus {
-      border-color: var(--teal);
-      box-shadow: 0 0 0 2px var(--teal-light);
-    }
-    .search-clear {
-      position: absolute;
-      right: 7px;
-      top: 50%;
-      transform: translateY(-50%);
-      width: 18px;
-      height: 18px;
-      border: 0;
-      background: transparent;
-      color: var(--muted);
-      cursor: pointer;
-      font-family: var(--font);
-      font-size: 13px;
-      line-height: 18px;
-      display: none;
-    }
-    .search-clear.visible { display: block; }
-    .filter-bar {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-    .filter-btn {
-      font-family: var(--font);
-      font-size: 10px;
-      padding: 4px 8px;
-      border-radius: 999px;
-      border: 1px solid var(--teal);
-      background: transparent;
-      color: var(--teal-dark);
-      cursor: pointer;
-    }
-    .filter-btn.active {
-      background: var(--teal);
-      color: #fff;
-    }
+**Steps:**
+
+- [ ] **Step 1: Link shared CSS**
+
+In `<head>`, after `</style>`, add:
+
+```html
+<link rel="stylesheet" href="/static/controls.css" />
 ```
 
 - [ ] **Step 2: Add controls markup**
 
-After the `<p class="page-sub">...` line and before `<div id="drafts">`, insert:
+After `<p class="page-sub">...</p>` and before `<div id="drafts">`, insert:
 
 ```html
     <div class="inbox-controls">
       <div class="search-wrap">
         <input class="search-input" id="inbox-search" type="search" placeholder="Search inbox..." autocomplete="off" />
-        <button class="search-clear" id="inbox-search-clear" type="button" aria-label="Clear inbox search">X</button>
+        <button class="search-clear" id="inbox-search-clear" type="button" aria-label="Clear search">X</button>
       </div>
-      <div class="filter-bar" id="inbox-filter-bar" aria-label="Inbox document type filters"></div>
+      <div class="filter-bar" id="inbox-filter-bar"></div>
     </div>
 ```
 
-- [ ] **Step 3: Add shared JS state/helpers**
+- [ ] **Step 3: Add JS state and helpers**
 
-After `basename(p)` in the script, add:
+After `basename(p)` function, add:
 
 ```javascript
     const INBOX_FILTERS = [
-      ["all", "All"],
-      ["draft", "Draft"],
-      ["policy", "Policy"],
-      ["contract", "Contract"],
-      ["rfp", "RFP"],
-      ["postmortem", "Postmortem"],
-      ["slack", "Slack"],
-      ["other", "Other"],
+      ["all", "All"], ["draft", "Draft"], ["policy", "Policy"],
+      ["contract", "Contract"], ["rfp", "RFP"], ["postmortem", "Postmortem"],
+      ["slack", "Slack"], ["other", "Other"],
     ];
     let inboxTypeFilter = "all";
     let inboxSearchTerm = "";
     let inboxSearchTimer = null;
 
-    function normalizeSearchText(parts) {
-      return parts
-        .filter((part) => part != null)
-        .map((part) => String(part).toLowerCase())
-        .join(" ");
-    }
-
     function renderInboxFilters() {
       document.getElementById("inbox-filter-bar").innerHTML = INBOX_FILTERS
-        .map(([value, label]) => `<button type="button" class="filter-btn ${value === inboxTypeFilter ? "active" : ""}" data-filter="${esc(value)}">${esc(label)}</button>`)
-        .join("");
+        .map(([val, label]) =>
+          `<button type="button" class="filter-btn ${val === inboxTypeFilter ? "active" : ""}" data-filter="${esc(val)}">${esc(label)}</button>`
+        ).join("");
       document.querySelectorAll("#inbox-filter-bar .filter-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
-          inboxTypeFilter = btn.getAttribute("data-filter") || "all";
+          inboxTypeFilter = btn.dataset.filter || "all";
           renderInboxFilters();
           applyInboxFilters();
         });
@@ -726,20 +533,19 @@ After `basename(p)` in the script, add:
     }
 
     function applyInboxFilters() {
-      const list = document.getElementById("drafts");
-      const cards = [...list.querySelectorAll(".draft-card")];
+      const cards = [...document.querySelectorAll("#drafts .draft-card")];
       let visible = 0;
       cards.forEach((card) => {
-        const typeMatches = inboxTypeFilter === "all" || card.dataset.type === inboxTypeFilter;
-        const textMatches = !inboxSearchTerm || (card.dataset.search || "").includes(inboxSearchTerm);
-        const show = typeMatches && textMatches;
-        card.hidden = !show;
-        if (show) visible += 1;
+        const typeOk = inboxTypeFilter === "all" || card.dataset.type === inboxTypeFilter;
+        const textOk = !inboxSearchTerm || (card.dataset.search || "").includes(inboxSearchTerm);
+        card.hidden = !(typeOk && textOk);
+        if (!card.hidden) visible++;
       });
-      const existingEmpty = list.querySelector(".filtered-empty");
-      if (existingEmpty) existingEmpty.remove();
-      if (cards.length && visible === 0) {
-        list.insertAdjacentHTML("beforeend", '<p class="empty filtered-empty">No inbox items match filters</p>');
+      const old = document.querySelector("#drafts .filtered-empty");
+      if (old) old.remove();
+      if (cards.length && !visible) {
+        document.getElementById("drafts").insertAdjacentHTML("beforeend",
+          '<p class="filtered-empty">No inbox items match filters</p>');
       }
     }
 
@@ -758,29 +564,20 @@ After `basename(p)` in the script, add:
         input.value = "";
         inboxSearchTerm = "";
         clear.classList.remove("visible");
-        clearTimeout(inboxSearchTimer);
         applyInboxFilters();
         input.focus();
       });
     }
 ```
 
-- [ ] **Step 4: Add card `data-type` and `data-search` attributes**
+- [ ] **Step 4: Add `data-type` and `data-search` to draft cards**
 
-At the top of `renderDraft(d)`, after `const pills = [];`, add:
+In `renderDraft(d)`, after `const pills = [];`, add:
 
 ```javascript
       const itemType = d.type || "other";
-      const searchText = normalizeSearchText([
-        d.path,
-        d.name,
-        d.title,
-        d.matched_source,
-        basename(d.matched_source),
-        d.summary,
-        d.body_markdown,
-        d.slack_message,
-      ]);
+      const searchText = [d.path, d.name, d.title, d.matched_source, basename(d.matched_source), d.summary, d.body_markdown, d.slack_message]
+        .filter(Boolean).map(s => String(s).toLowerCase()).join(" ");
 ```
 
 Change the article opening from:
@@ -803,90 +600,62 @@ In `load()`, after `el.innerHTML = items.map(renderDraft).join("");`, add:
 
 - [ ] **Step 5: Initialize controls**
 
-Before `load();` at the bottom, add:
+Before `load();` at bottom of script, add:
 
 ```javascript
     renderInboxFilters();
     setupInboxSearch();
 ```
 
-- [ ] **Step 6: Commit inbox detail work**
-
-Run:
+- [ ] **Step 6: Commit**
 
 ```bash
 git add dashboard/static/inbox.html
-git commit -m "feat: add inbox detail filters"
+git commit -m "feat: add inbox detail page search and filter"
 ```
 
-## Task 4: Verification
+## Task 5: Verification
+
+**Goal:** Confirm all tests pass and no regressions.
 
 **Files:**
-- Verify: `dashboard/app.py`
-- Verify: `dashboard/static/index.html`
-- Verify: `dashboard/static/inbox.html`
-- Verify: `tests/test_dashboard.py`
+- Verify: all modified files
 
-- [ ] **Step 1: Run targeted dashboard tests**
+**Acceptance Criteria:**
+- [ ] `tests/test_dashboard.py` passes
+- [ ] `tests/test_ingest.py` passes (existing behavior intact)
+- [ ] Full test suite passes
 
-Run:
+**Verify:** `uv run pytest`
 
-```bash
-uv run pytest tests/test_dashboard.py -v
-```
+**Steps:**
 
-Expected: all tests PASS.
+- [ ] **Step 1: Run dashboard tests**
 
-- [ ] **Step 2: Run existing ingest tests**
+Run: `uv run pytest tests/test_dashboard.py -v`
 
-Run:
+Expected: 3 tests PASS.
 
-```bash
-uv run pytest tests/test_ingest.py -v
-```
+- [ ] **Step 2: Run ingest tests**
 
-Expected: all tests PASS. These tests confirm existing `ingest_folder()` behavior remains intact.
+Run: `uv run pytest tests/test_ingest.py -v`
 
-- [ ] **Step 3: Run full suite if time permits**
+Expected: all PASS — `ingest_folder()` unchanged.
 
-Run:
+- [ ] **Step 3: Run full suite**
 
-```bash
-uv run pytest
-```
+Run: `uv run pytest`
 
-Expected: all tests PASS. If failures are unrelated to touched dashboard/ingest behavior, record exact failing test names and failure text in final handoff.
+Expected: all PASS. If unrelated failures, note them but don't block.
 
-- [ ] **Step 4: Optional local dashboard smoke test**
+- [ ] **Step 4: Smoke test dashboard**
 
-Run dashboard:
+Run: `uv run python -m dashboard`
 
-```bash
-uv run dashboard
-```
-
-Open:
-
-```text
-http://127.0.0.1:7842/
-```
-
-Smoke checks:
-
-- Inbox panel shows search input above filter buttons.
-- `All` active by default.
-- `RFP` hides non-RFP inbox rows.
-- Search text narrows visible rows and clear `X` restores them.
-- `/inbox` page has same controls and behavior.
-- Re-ingest disables button, cycles spinner text, then shows success or red error.
-
-- [ ] **Step 5: Final commit if verification required fixes**
-
-If verification required fixes after previous commits, run:
-
-```bash
-git add dashboard/app.py dashboard/static/index.html dashboard/static/inbox.html tests/test_dashboard.py
-git commit -m "test: verify dashboard inbox and ingest behavior"
-```
-
-If no files changed during verification, do not create an empty commit.
+Open `http://127.0.0.1:7842/`:
+- Inbox shows search input + filter buttons
+- "All" active by default
+- Clicking "Policy" hides non-policy rows
+- Typing in search narrows rows, X clears
+- Re-ingest shows spinner, success message, or red error
+- `/inbox` page has same filter/search behavior

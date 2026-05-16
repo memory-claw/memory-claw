@@ -60,6 +60,39 @@
     }
     .draft-body h1, .draft-body h2, .draft-body h3 { margin: 10px 0 6px; font-size: 14px; }
     .draft-body p { margin: 6px 0; }
+    .draft-body-expand { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+    .draft-body-preview {
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--text);
+      white-space: pre-wrap;
+    }
+    .draft-body-full-wrap {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 300ms ease;
+    }
+    .draft-body-expand.is-expanded .draft-body-preview { display: none; }
+    .draft-body-full {
+      font-size: 12px;
+      line-height: 1.55;
+      padding-top: 0;
+    }
+    .draft-body-full h1, .draft-body-full h2, .draft-body-full h3 { margin: 10px 0 6px; font-size: 14px; }
+    .draft-body-full p { margin: 6px 0; }
+    .body-toggle {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 0;
+      border: none;
+      background: none;
+      font-family: var(--font);
+      font-size: 12px;
+      color: var(--teal);
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .body-toggle:hover { text-decoration: underline; }
     .decision { font-size: 12px; }
     .decision h4 {
       font-size: 10px;
@@ -91,12 +124,20 @@
     .empty { text-align: center; color: var(--muted); padding: 48px; }
     .loading { color: var(--muted); padding: 24px; }
   </style>
+  <link rel="stylesheet" href="/static/controls.css" />
 </head>
 <body>
   <div class="wrap">
     <a class="back" href="/">← back to dashboard</a>
     <h1>inbox</h1>
     <p class="page-sub">All drafts in company/inbox/ with bot decisions from processed_drafts.json and audit_log.jsonl</p>
+    <div class="inbox-controls">
+      <div class="search-wrap">
+        <input class="search-input" id="inbox-search" type="search" placeholder="Search inbox..." autocomplete="off" />
+        <button class="search-clear" id="inbox-search-clear" type="button" aria-label="Clear search">X</button>
+      </div>
+      <div class="filter-bar" id="inbox-filter-bar"></div>
+    </div>
     <div id="drafts"><p class="loading">Loading drafts…</p></div>
   </div>
   <script>
@@ -112,8 +153,125 @@
       return parts[parts.length - 1];
     }
 
+    const INBOX_FILTERS = [
+      ["all", "All"], ["draft", "Draft"], ["policy", "Policy"],
+      ["contract", "Contract"], ["rfp", "RFP"], ["postmortem", "Postmortem"],
+      ["slack", "Slack"], ["other", "Other"],
+    ];
+    let inboxTypeFilter = "all";
+    let inboxSearchTerm = "";
+    let inboxSearchTimer = null;
+
+    function renderInboxFilters() {
+      document.getElementById("inbox-filter-bar").innerHTML = INBOX_FILTERS
+        .map(([val, label]) =>
+          `<button type="button" class="filter-btn ${val === inboxTypeFilter ? "active" : ""}" data-filter="${esc(val)}">${esc(label)}</button>`
+        ).join("");
+      document.querySelectorAll("#inbox-filter-bar .filter-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          inboxTypeFilter = btn.dataset.filter || "all";
+          renderInboxFilters();
+          applyInboxFilters();
+        });
+      });
+    }
+
+    function applyInboxFilters() {
+      const cards = [...document.querySelectorAll("#drafts .draft-card")];
+      let visible = 0;
+      cards.forEach((card) => {
+        const typeOk = inboxTypeFilter === "all" || card.dataset.type === inboxTypeFilter;
+        const textOk = !inboxSearchTerm || (card.dataset.search || "").includes(inboxSearchTerm);
+        card.hidden = !(typeOk && textOk);
+        if (!card.hidden) visible++;
+      });
+      const old = document.querySelector("#drafts .filtered-empty");
+      if (old) old.remove();
+      if (cards.length && !visible) {
+        document.getElementById("drafts").insertAdjacentHTML("beforeend",
+          '<p class="filtered-empty">No inbox items match filters</p>');
+      }
+    }
+
+    function setupInboxSearch() {
+      const input = document.getElementById("inbox-search");
+      const clear = document.getElementById("inbox-search-clear");
+      input.addEventListener("input", () => {
+        clear.classList.toggle("visible", input.value.length > 0);
+        clearTimeout(inboxSearchTimer);
+        inboxSearchTimer = setTimeout(() => {
+          inboxSearchTerm = input.value.trim().toLowerCase();
+          applyInboxFilters();
+        }, 200);
+      });
+      clear.addEventListener("click", () => {
+        input.value = "";
+        inboxSearchTerm = "";
+        clear.classList.remove("visible");
+        applyInboxFilters();
+        input.focus();
+      });
+    }
+
+    function stripHtml(html) {
+      const d = document.createElement("div");
+      d.innerHTML = html || "";
+      return (d.textContent || "").replace(/\s+/g, " ").trim();
+    }
+
+    function truncatePlain(plain, maxLen) {
+      if (plain.length <= maxLen) {
+        return { preview: plain, needsToggle: false };
+      }
+      let cut = plain.slice(0, maxLen);
+      const lastSpace = cut.lastIndexOf(" ");
+      if (lastSpace > 40) cut = cut.slice(0, lastSpace);
+      return { preview: cut.trimEnd() + "…", needsToggle: true };
+    }
+
+    function renderBody(d) {
+      const html = d.body_html || "";
+      const markdown = d.body_markdown || "";
+      const plain = stripHtml(html) || markdown.replace(/\s+/g, " ").trim();
+      const { preview, needsToggle } = truncatePlain(plain, 300);
+
+      if (!needsToggle) {
+        return `<div class="draft-body">${html || esc(markdown)}</div>`;
+      }
+
+      return `<div class="draft-body-expand" data-path="${esc(d.path)}">
+        <div class="draft-body-preview">${esc(preview)}</div>
+        <div class="draft-body-full-wrap">
+          <div class="draft-body-full">${html || esc(markdown)}</div>
+        </div>
+        <button type="button" class="body-toggle" aria-expanded="false">See more</button>
+      </div>`;
+    }
+
+    function bindBodyToggles(root) {
+      root.querySelectorAll(".draft-body-expand").forEach((block) => {
+        const btn = block.querySelector(".body-toggle");
+        const fullWrap = block.querySelector(".draft-body-full-wrap");
+        if (!btn || !fullWrap) return;
+
+        btn.addEventListener("click", () => {
+          const expanded = block.classList.toggle("is-expanded");
+          btn.setAttribute("aria-expanded", expanded ? "true" : "false");
+          btn.textContent = expanded ? "See less" : "See more";
+          if (expanded) {
+            fullWrap.style.maxHeight = fullWrap.scrollHeight + "px";
+          } else {
+            fullWrap.style.maxHeight = "0px";
+          }
+        });
+      });
+    }
+
     function renderDraft(d) {
       const pills = [];
+      const itemType = d.type || "other";
+      const searchText = [d.path, d.name, d.title, d.matched_source, basename(d.matched_source), d.summary, d.body_markdown, d.slack_message]
+        .filter(Boolean).map(s => String(s).toLowerCase()).join(" ");
       if (d.matched_source) pills.push(`<span class="pill">${esc(basename(d.matched_source))}</span>`);
       if (d.score != null) pills.push(`<span class="pill">score ${esc(Number(d.score).toFixed(2))}</span>`);
       if (d.slack_channel) pills.push(`<span class="pill">${esc(d.slack_channel)}</span>`);
@@ -133,7 +291,7 @@
           ? `<div class="slack-msg">No message sent.${d.skip_reason ? " " + esc(d.skip_reason) : ""}</div>`
           : "";
 
-      return `<article class="draft-card" id="${esc(d.path)}">
+      return `<article class="draft-card" id="${esc(d.path)}" data-type="${esc(itemType)}" data-search="${esc(searchText)}">
         <div class="draft-head">
           <div>
             <div class="draft-title">${esc(d.title)}</div>
@@ -141,7 +299,7 @@
           </div>
           <span class="badge ${esc(d.status)}">${esc(d.status)}</span>
         </div>
-        <div class="draft-body">${d.body_html || esc(d.body_markdown || "")}</div>
+        ${renderBody(d)}
         ${slackMeta ? `<div class="decision"><h4>slack source</h4>${slackMeta}</div>` : ""}
         <div class="decision">
           <h4>bot decision</h4>
@@ -162,6 +320,8 @@
           return;
         }
         el.innerHTML = items.map(renderDraft).join("");
+        bindBodyToggles(el);
+        applyInboxFilters();
         if (location.hash) {
           const target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
           if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -171,6 +331,8 @@
       }
     }
 
+    renderInboxFilters();
+    setupInboxSearch();
     load();
   </script>
 </body>

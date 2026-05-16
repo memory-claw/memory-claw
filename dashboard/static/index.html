@@ -141,6 +141,7 @@
       transition: opacity 0.4s ease;
     }
     .ingest-status.fade { opacity: 0; }
+    .ingest-status.error { color: var(--red); }
     .ingest-spinner { color: var(--muted); }
     .sparkbar {
       display: flex;
@@ -589,14 +590,20 @@
       statusEl.classList.remove("fade");
       statusEl.innerHTML = '<span class="ingest-spinner">...</span>';
       try {
-        const data = await fetch("/api/run/ingest", { method: "POST" }).then((r) => r.json());
-        const msg = data.added > 0
-          ? `✓ ${data.added} doc${data.added === 1 ? "" : "s"} added`
-          : "✓ already up to date";
-        statusEl.textContent = msg;
-        refresh();
+        const response = await fetch("/api/run/ingest", { method: "POST" });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        const added = Number(data.added || 0);
+        statusEl.textContent = `✓ ${added} doc${added === 1 ? "" : "s"} added`;
+        await Promise.all([
+          fetch("/api/stats").then((r) => r.json()).then(renderStats),
+          fetch("/api/corpus").then((r) => r.json()).then(renderCorpus),
+        ]);
       } catch (e) {
-        statusEl.textContent = "✗ ingest failed";
+        statusEl.classList.add("error");
+        statusEl.textContent = `✗ ${e.message || "ingest failed"}`;
       } finally {
         btn.disabled = false;
         setTimeout(() => statusEl.classList.add("fade"), 4000);
