@@ -20,6 +20,7 @@
 - Modify `institutional_memory/cli.py`: add one-shot `sync-slack`, `promote-slack-thread`, and `reset-demo --clear-slack-inbox`.
 - Modify `institutional_memory/slack.py`: broaden source attribution regex to nested `.txt` and `.md` corpus paths.
 - Modify `scripts/dgx_check.py`: add optional `--check-slack-ingestion`.
+- Create `inbox/slack/.gitkeep` and `corpus/slack/.gitkeep`: make Slack import directories exist on fresh clones.
 - Modify `.env.example` and `README.md`: document Slack app token, listener, manual sync, promotion, and re-ingest.
 - Add tests in `tests/test_slack_ingest.py`, `tests/test_drafts.py`, `tests/test_cli_json.py`, `tests/test_paths.py`, `tests/test_slack.py`, `tests/test_dgx_check.py`, and `tests/test_readme_handoff.py`.
 
@@ -28,6 +29,8 @@
 ### Task 1: Config And Safe Corpus Paths
 
 **Files:**
+- Create: `inbox/slack/.gitkeep`
+- Create: `corpus/slack/.gitkeep`
 - Modify: `institutional_memory/config.py`
 - Modify: `institutional_memory/paths.py`
 - Modify: `.env.example`
@@ -38,7 +41,8 @@
 Add these tests to `tests/test_paths.py`:
 
 ```python
-from institutional_memory.paths import safe_corpus_path
+from institutional_memory.config import PROJECT_ROOT
+from institutional_memory.paths import PathNotAllowedError, safe_corpus_path
 
 
 def test_safe_corpus_allows_markdown_under_slack_corpus():
@@ -89,6 +93,13 @@ In `.env.example`, add:
 SLACK_APP_TOKEN=xapp-your-token-here
 ```
 
+Create empty placeholder files:
+
+```text
+inbox/slack/.gitkeep
+corpus/slack/.gitkeep
+```
+
 - [ ] **Step 4: Verify tests pass**
 
 Run:
@@ -102,7 +113,7 @@ Expected: all path tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add .env.example institutional_memory/config.py institutional_memory/paths.py tests/test_paths.py
+git add .env.example corpus/slack/.gitkeep inbox/slack/.gitkeep institutional_memory/config.py institutional_memory/paths.py tests/test_paths.py
 git commit -m "feat: add Slack ingestion config paths"
 ```
 
@@ -305,6 +316,8 @@ git commit -m "fix: recognize nested corpus source attributions"
 Create `tests/test_slack_ingest.py`:
 
 ```python
+import pytest
+
 from institutional_memory import slack_ingest
 
 
@@ -328,24 +341,38 @@ def test_should_ignore_bot_message():
 
 def test_render_thread_markdown_contains_metadata_and_messages():
     messages = [
-        {"user": "U123", "text": "Need NHS liability precedent", "ts": "1710000000.000000"},
+        {"user": "U123", "text": "Need NHS &amp; liability precedent", "ts": "1710000000.000000"},
         {"user": "U456", "text": "Check old postmortem", "ts": "1710000001.000000"},
     ]
 
     text = slack_ingest.render_thread_markdown(
         channel="C123",
-        thread_ts="1710000000.000000",
+        thread_ts_value="1710000000.000000",
         messages=messages,
         permalink="https://example.slack.com/archives/C123/p1710000000000000",
         imported_at="2026-05-16T00:00:00+00:00",
     )
 
-    assert "# Slack Thread: Need NHS liability precedent" in text
+    assert "# Slack Thread: Need NHS & liability precedent" in text
     assert "**Channel:** C123" in text
     assert "**Thread TS:** 1710000000.000000" in text
     assert "**Permalink:** https://example.slack.com/archives/C123/p1710000000000000" in text
-    assert "- 1710000000.000000 U123: Need NHS liability precedent" in text
+    assert "- 1710000000.000000 U123: Need NHS & liability precedent" in text
     assert "- 1710000001.000000 U456: Check old postmortem" in text
+
+
+def test_promote_slack_thread_rejects_non_slack_inbox_file(tmp_path, monkeypatch):
+    inbox = tmp_path / "inbox"
+    corpus = tmp_path / "corpus"
+    inbox.mkdir()
+    corpus.mkdir()
+    (inbox / "ordinary.md").write_text("not a Slack import", encoding="utf-8")
+    monkeypatch.setattr(slack_ingest, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(slack_ingest, "INBOX_PATH", inbox)
+    monkeypatch.setattr(slack_ingest, "CORPUS_PATH", corpus)
+
+    with pytest.raises(slack_ingest.PathNotAllowedError):
+        slack_ingest.promote_slack_thread("inbox/ordinary.md")
 ```
 
 - [ ] **Step 2: Run failing tests**
@@ -367,6 +394,7 @@ from __future__ import annotations
 
 import html
 import shutil
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -400,6 +428,7 @@ def should_ignore_event(event: dict[str, Any]) -> bool:
 
 def _preview(messages: list[dict[str, Any]]) -> str:
     text = next((str(item.get("text", "")).strip() for item in messages if item.get("text")), "Slack thread")
+    text = html.unescape(text)
     text = " ".join(text.split())
     return text[:80] if text else "Slack thread"
 
@@ -407,7 +436,7 @@ def _preview(messages: list[dict[str, Any]]) -> str:
 def render_thread_markdown(
     *,
     channel: str,
-    thread_ts: str,
+    thread_ts_value: str,
     messages: list[dict[str, Any]],
     permalink: str | None,
     imported_at: str | None = None,
@@ -417,7 +446,7 @@ def render_thread_markdown(
         f"# Slack Thread: {_preview(messages)}",
         "",
         f"**Channel:** {channel}",
-        f"**Thread TS:** {thread_ts}",
+        f"**Thread TS:** {thread_ts_value}",
         f"**Imported At:** {imported}",
         "**Source:** Slack",
         f"**Permalink:** {permalink or ''}",
@@ -441,20 +470,32 @@ def destination_path(mode: Mode, filename: str) -> Path:
     raise ValueError(f"invalid Slack sync mode: {mode}")
 
 
-def is_processed(path: Path) -> bool:
+def processed_paths() -> set[str]:
+    return {str(record.get("path")) for record in load_processed_records() if record.get("path")}
+
+
+def is_processed(path: Path, processed: set[str]) -> bool:
     rel = str(path.resolve().relative_to(PROJECT_ROOT))
-    return rel in {record.get("path") for record in load_processed_records()}
+    return rel in processed
 
 
-def write_thread_file(mode: Mode, event: dict[str, Any], messages: list[dict[str, Any]], permalink: str | None, force: bool = False) -> Path:
+def write_thread_file(
+    mode: Mode,
+    event: dict[str, Any],
+    messages: list[dict[str, Any]],
+    permalink: str | None,
+    force: bool = False,
+    processed: set[str] | None = None,
+) -> Path:
     path = destination_path(mode, thread_file_name(event))
-    if mode == "inbox" and path.exists() and is_processed(path) and not force:
+    processed = processed_paths() if processed is None else processed
+    if mode == "inbox" and path.exists() and is_processed(path, processed) and not force:
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         render_thread_markdown(
             channel=str(event["channel"]),
-            thread_ts=thread_ts(event),
+            thread_ts_value=thread_ts(event),
             messages=messages,
             permalink=permalink,
         ),
@@ -466,6 +507,8 @@ def write_thread_file(mode: Mode, event: dict[str, Any], messages: list[dict[str
 def promote_slack_thread(path: str, force: bool = False) -> dict[str, Any]:
     source = safe_inbox_path(path)
     rel = source.resolve().relative_to(INBOX_PATH.resolve())
+    if not rel.parts or rel.parts[0] != "slack":
+        raise PathNotAllowedError("Only files under inbox/slack/ can be promoted with promote-slack-thread")
     destination = safe_corpus_path(str(CORPUS_PATH / rel))
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists() and not force:
@@ -526,7 +569,7 @@ def test_sync_slack_history_writes_inbox_files(tmp_path, monkeypatch):
     monkeypatch.setattr(slack_ingest, "CORPUS_PATH", tmp_path / "corpus")
     monkeypatch.setattr(slack_ingest, "load_processed_records", lambda: [])
 
-    result = slack_ingest.sync_slack_history(mode="inbox", channel="C123", limit=20, client=FakeSlackClient())
+    result = slack_ingest.sync_slack_history(mode="inbox", channel="C123", limit=20, client=FakeSlackClient(), sleep_seconds=0)
 
     assert result["status"] == "ok"
     assert result["written"] == ["inbox/slack/C123_1710000000.000000.md"]
@@ -538,11 +581,62 @@ def test_sync_slack_history_corpus_includes_ingest_reminder(tmp_path, monkeypatc
     monkeypatch.setattr(slack_ingest, "INBOX_PATH", tmp_path / "inbox")
     monkeypatch.setattr(slack_ingest, "CORPUS_PATH", tmp_path / "corpus")
 
-    result = slack_ingest.sync_slack_history(mode="corpus", channel="C123", limit=20, client=FakeSlackClient())
+    result = slack_ingest.sync_slack_history(mode="corpus", channel="C123", limit=20, client=FakeSlackClient(), sleep_seconds=0)
 
     assert result["status"] == "ok"
     assert result["written"] == ["corpus/slack/C123_1710000000.000000.md"]
     assert "ingest_corpus.py --force" in result["note"]
+
+
+def test_sync_slack_history_loads_processed_registry_once(tmp_path, monkeypatch):
+    calls = 0
+
+    def fake_processed_records():
+        nonlocal calls
+        calls += 1
+        return []
+
+    monkeypatch.setattr(slack_ingest, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(slack_ingest, "INBOX_PATH", tmp_path / "inbox")
+    monkeypatch.setattr(slack_ingest, "CORPUS_PATH", tmp_path / "corpus")
+    monkeypatch.setattr(slack_ingest, "load_processed_records", fake_processed_records)
+
+    slack_ingest.sync_slack_history(mode="inbox", channel="C123", limit=20, client=FakeSlackClient(), sleep_seconds=0)
+
+    assert calls == 1
+
+
+class PartialFailureSlackClient(FakeSlackClient):
+    def conversations_history(self, channel, limit):
+        return {
+            "messages": [
+                {"channel": channel, "ts": "1710000000.000000", "user": "U123", "text": "bad thread"},
+                {"channel": channel, "ts": "1710000001.000000", "user": "U456", "text": "good thread"},
+            ]
+        }
+
+    def conversations_replies(self, channel, ts):
+        if ts == "1710000000.000000":
+            raise RuntimeError("thread not available")
+        return {"messages": [{"channel": channel, "ts": ts, "user": "U456", "text": "good thread"}]}
+
+
+def test_sync_slack_history_keeps_going_after_one_thread_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(slack_ingest, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(slack_ingest, "INBOX_PATH", tmp_path / "inbox")
+    monkeypatch.setattr(slack_ingest, "CORPUS_PATH", tmp_path / "corpus")
+    monkeypatch.setattr(slack_ingest, "load_processed_records", lambda: [])
+
+    result = slack_ingest.sync_slack_history(
+        mode="inbox",
+        channel="C123",
+        limit=20,
+        client=PartialFailureSlackClient(),
+        sleep_seconds=0,
+    )
+
+    assert result["written"] == ["inbox/slack/C123_1710000001.000000.md"]
+    assert result["errors"] == [{"ts": "1710000000.000000", "error": "thread not available"}]
 ```
 
 - [ ] **Step 2: Add failing CLI tests**
@@ -574,12 +668,25 @@ def test_promote_slack_thread_cli_emits_json(monkeypatch, capsys):
     args = cli.build_parser().parse_args(["promote-slack-thread", "--path", "inbox/slack/file.md"])
     assert args.func(args) == 0
     assert "corpus/slack/file.md" in capsys.readouterr().out
+
+
+def test_slack_operator_commands_are_visible_in_help():
+    result = subprocess.run(["./bin/imem", "--help"], check=True, capture_output=True, text=True)
+
+    assert "sync-slack" in result.stdout
+    assert "promote-slack-thread" in result.stdout
+
+
+def test_promote_slack_thread_subprocess_blocks_traversal_with_json_error():
+    payload = run_imem("promote-slack-thread", "--path", "../.env")
+
+    assert "error" in payload
 ```
 
 - [ ] **Step 3: Run failing tests**
 
 ```bash
-uv run pytest tests/test_slack_ingest.py tests/test_cli_json.py::test_sync_slack_cli_emits_json tests/test_cli_json.py::test_promote_slack_thread_cli_emits_json -q
+uv run pytest tests/test_slack_ingest.py tests/test_cli_json.py::test_sync_slack_cli_emits_json tests/test_cli_json.py::test_promote_slack_thread_cli_emits_json tests/test_cli_json.py::test_slack_operator_commands_are_visible_in_help tests/test_cli_json.py::test_promote_slack_thread_subprocess_blocks_traversal_with_json_error -q
 ```
 
 Expected: fail until sync function and CLI commands exist.
@@ -597,17 +704,27 @@ def _client(client: WebClient | None = None) -> WebClient:
     return WebClient(token=SLACK_BOT_TOKEN)
 
 
-def _permalink(client: WebClient, channel: str, ts: str) -> str | None:
+def _permalink(web_client: WebClient, channel: str, ts: str) -> str | None:
     try:
-        return client.chat_getPermalink(channel=channel, message_ts=ts).get("permalink")
+        return web_client.chat_getPermalink(channel=channel, message_ts=ts).get("permalink")
     except SlackApiError:
         return None
 
 
-def sync_slack_history(*, mode: Mode, channel: str, limit: int, client: WebClient | None = None, force: bool = False) -> dict[str, Any]:
-    slack = _client(client)
-    response = slack.conversations_history(channel=channel, limit=limit)
+def sync_slack_history(
+    *,
+    mode: Mode,
+    channel: str,
+    limit: int,
+    client: WebClient | None = None,
+    force: bool = False,
+    sleep_seconds: float = 1.2,
+) -> dict[str, Any]:
+    web_client = _client(client)
+    response = web_client.conversations_history(channel=channel, limit=limit)
+    processed = processed_paths()
     written: list[str] = []
+    errors: list[dict[str, str]] = []
     skipped = 0
     for message in response.get("messages", []):
         event = {**message, "channel": channel}
@@ -615,14 +732,38 @@ def sync_slack_history(*, mode: Mode, channel: str, limit: int, client: WebClien
             skipped += 1
             continue
         root_ts = thread_ts(event)
-        replies = slack.conversations_replies(channel=channel, ts=root_ts).get("messages", [event])
-        path = write_thread_file(mode, event, replies, _permalink(slack, channel, root_ts), force=force)
+        try:
+            replies = web_client.conversations_replies(channel=channel, ts=root_ts).get("messages", [event])
+        except Exception as exc:
+            errors.append({"ts": root_ts, "error": str(exc)})
+            continue
+        path = write_thread_file(
+            mode,
+            event,
+            replies,
+            _permalink(web_client, channel, root_ts),
+            force=force,
+            processed=processed,
+        )
         written.append(str(path.relative_to(PROJECT_ROOT)))
-    result: dict[str, Any] = {"status": "ok", "mode": mode, "channel": channel, "written": sorted(set(written)), "skipped": skipped}
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
+    result: dict[str, Any] = {
+        "status": "ok",
+        "mode": mode,
+        "channel": channel,
+        "written": sorted(set(written)),
+        "skipped": skipped,
+        "errors": errors,
+    }
     if mode == "corpus":
         result["note"] = INGEST_REMINDER
     return result
 ```
+
+`sleep_seconds` is intentional rate-limit protection. The CLI default of `1.2`
+keeps large imports from making `conversations_replies` and `chat_getPermalink`
+calls in a tight loop; tests pass `sleep_seconds=0`.
 
 - [ ] **Step 5: Implement CLI commands**
 
@@ -633,7 +774,13 @@ def cmd_sync_slack(args: argparse.Namespace) -> int:
     from institutional_memory.slack_ingest import sync_slack_history
 
     try:
-        result = sync_slack_history(mode=args.mode, channel=args.channel, limit=args.limit, force=args.force)
+        result = sync_slack_history(
+            mode=args.mode,
+            channel=args.channel,
+            limit=args.limit,
+            force=args.force,
+            sleep_seconds=args.sleep_seconds,
+        )
     except Exception as exc:
         return _emit_error(f"sync slack failed: {exc}", "slack_sync_failed", channel=args.channel, mode=args.mode)
     log_event("slack_synced", **result)
@@ -653,6 +800,16 @@ def cmd_promote_slack_thread(args: argparse.Namespace) -> int:
     return 0
 ```
 
+Update the `visible_commands` string so operator commands are visible in
+`./bin/imem --help`:
+
+```python
+    visible_commands = (
+        "hello,list-new-drafts,read-draft,mark-processed,reset-demo,search-memory,"
+        "send-slack,sync-slack,promote-slack-thread"
+    )
+```
+
 Add parsers:
 
 ```python
@@ -660,6 +817,7 @@ Add parsers:
     sync.add_argument("--mode", choices=["inbox", "corpus"], required=True)
     sync.add_argument("--channel", required=True)
     sync.add_argument("--limit", type=int, default=20)
+    sync.add_argument("--sleep-seconds", type=float, default=1.2)
     sync.add_argument("--force", action="store_true")
     sync.set_defaults(func=cmd_sync_slack)
 
@@ -729,11 +887,11 @@ def handle_message_event(event: dict[str, Any], client: WebClient | None = None,
         return {"status": "ignored", "reason": "not_message"}
     if should_ignore_event(event):
         return {"status": "ignored", "reason": "bot_or_subtype"}
-    slack = _client(client)
+    web_client = _client(client)
     channel = str(event["channel"])
     root_ts = thread_ts(event)
-    replies = slack.conversations_replies(channel=channel, ts=root_ts).get("messages", [event])
-    path = write_thread_file("inbox", event, replies, _permalink(slack, channel, root_ts), force=force)
+    replies = web_client.conversations_replies(channel=channel, ts=root_ts).get("messages", [event])
+    path = write_thread_file("inbox", event, replies, _permalink(web_client, channel, root_ts), force=force)
     return {"status": "written", "path": str(path.relative_to(PROJECT_ROOT))}
 ```
 
@@ -752,6 +910,7 @@ from __future__ import annotations
 
 import json
 import sys
+from threading import Event
 
 from slack_sdk import WebClient
 from slack_sdk.socket_mode import SocketModeClient
@@ -786,7 +945,6 @@ def main() -> int:
     client.socket_mode_request_listeners.append(process)
     client.connect()
     print(json.dumps({"status": "listening"}), flush=True)
-    from threading import Event
 
     Event().wait()
     return 0
@@ -997,13 +1155,11 @@ uv run pytest
 
 Expected: all tests pass.
 
-- [ ] **Step 2: Run focused command smoke tests**
+- [ ] **Step 2: Run focused command smoke test**
 
-```bash
-./bin/imem sync-slack --mode inbox --channel C123 --limit 1
-```
-
-Expected without real token: JSON error, no traceback, exit code 0 under the existing CLI error convention.
+Do not run a live `sync-slack` smoke test on a machine whose `.env` has a real
+`SLACK_BOT_TOKEN`; that would call Slack. Parser and JSON behavior are covered
+by the subprocess tests in `tests/test_cli_json.py`.
 
 ```bash
 ./bin/imem promote-slack-thread --path ../.env
@@ -1136,3 +1292,4 @@ Expected: copied file exists in `corpus/slack/` and is searchable after ingest.
 - Spec coverage: covers live listener outside OpenClaw, manual sync to inbox/corpus, manual promote, no auto-promote, recursive inbox discovery, source attribution regex, optional Slack ingestion readiness, docs, and ASUS verification.
 - Placeholder scan: no unfinished-work markers remain.
 - Type consistency: commands use `sync-slack`, `promote-slack-thread`, and `scripts/slack_listener.py`; paths use `inbox/slack/*.md` and `corpus/slack/*.md`; helper names are consistent across tasks.
+- Review fixes covered: explicit `PROJECT_ROOT` import, HTML-unescaped previews, one processed-registry read per sync, visible operator commands, subprocess CLI smoke coverage, Slack-only promotion, `web_client` naming, no `thread_ts` parameter shadowing, per-thread sync errors, rate-limit sleep, Slack `.gitkeep` files, and top-level `Event` import.
