@@ -36,13 +36,18 @@ def run(*command: str, timeout: int = 120) -> tuple[int, str]:
     return result.returncode, result.stdout + result.stderr
 
 
+def _assistant_text(message: dict) -> str:
+    parts = [message.get("content") or "", message.get("thinking") or ""]
+    return "\n".join(part for part in parts if part).strip()
+
+
 def default_model_probe() -> str:
     response = ollama.Client(host=OLLAMA_BASE_URL).chat(
         model=LLM_MODEL,
         messages=[{"role": "user", "content": "Reply with READY."}],
         options={"num_predict": 64},
     )
-    return response["message"]["content"]
+    return _assistant_text(response["message"])
 
 
 def _model_smoke_worker(probe: Callable[[], str], queue: mp.Queue) -> None:
