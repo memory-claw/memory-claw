@@ -72,6 +72,14 @@ def audit_blockers(audit_text: str | None = None) -> list[str]:
     if not any(
         event.get("type") == "memory_searched"
         and event.get("driver") == "openclaw"
+        and isinstance(event.get("count"), int)
+        and event.get("count") > 0
+        for event in events
+    ):
+        blockers.append("missing success positive-hit search proof")
+    if not any(
+        event.get("type") == "memory_searched"
+        and event.get("driver") == "openclaw"
         and event.get("count") == 0
         for event in events
     ):
