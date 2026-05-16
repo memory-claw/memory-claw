@@ -66,3 +66,23 @@ def test_audit_requires_sent_slack_event(tmp_path, monkeypatch):
     blockers = final_gate.audit_blockers()
 
     assert "missing sent Slack proof" in blockers
+
+
+def test_audit_reports_malformed_json_line(tmp_path, monkeypatch):
+    audit = tmp_path / "audit_log.jsonl"
+    audit.write_text("{not json}\n", encoding="utf-8")
+    monkeypatch.setattr(final_gate, "AUDIT_LOG", audit)
+
+    blockers = final_gate.audit_blockers()
+
+    assert "malformed audit line 1" in blockers
+
+
+def test_audit_reports_non_object_json_line(tmp_path, monkeypatch):
+    audit = tmp_path / "audit_log.jsonl"
+    audit.write_text("[]\n", encoding="utf-8")
+    monkeypatch.setattr(final_gate, "AUDIT_LOG", audit)
+
+    blockers = final_gate.audit_blockers()
+
+    assert "non-object audit line 1" in blockers

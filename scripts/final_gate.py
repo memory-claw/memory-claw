@@ -41,10 +41,23 @@ def run(command: list[str], timeout: int = 180) -> dict:
 def audit_blockers() -> list[str]:
     if not AUDIT_LOG.exists():
         return ["audit_log.jsonl missing"]
-    events = [json.loads(line) for line in AUDIT_LOG.read_text(encoding="utf-8").splitlines() if line.strip()]
+    events = []
+    blockers = []
+    for line_number, line in enumerate(AUDIT_LOG.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            blockers.append(f"malformed audit line {line_number}")
+            continue
+        if not isinstance(event, dict):
+            blockers.append(f"non-object audit line {line_number}")
+            continue
+        events.append(event)
     required = {"draft_listed", "draft_read", "memory_searched", "slack_sent", "processed"}
     seen = {event.get("type") for event in events}
-    blockers = [f"missing audit event: {event}" for event in sorted(required - seen)]
+    blockers.extend(f"missing audit event: {event}" for event in sorted(required - seen))
     processed_statuses = {
         event.get("status")
         for event in events
