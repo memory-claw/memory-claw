@@ -4,71 +4,94 @@
     {
       "id": 0,
       "subject": "Task 0: Project Scaffolding & Dependencies",
-      "status": "pending",
+      "status": "complete",
       "description": "**Goal:** Set up FastAPI backend + React/Vite frontend with all deps installed and hello-world endpoint working.\n\n```json:metadata\n{\"files\": [\"institutional_memory/dashboard/__init__.py\", \"institutional_memory/dashboard/server.py\", \"dashboard-ui/package.json\", \"dashboard-ui/vite.config.ts\", \"pyproject.toml\"], \"verifyCommand\": \"curl http://localhost:8000/api/health\", \"acceptanceCriteria\": [\"FastAPI starts on :8000\", \"Vite proxies to FastAPI\", \"Dark theme renders\"]}\n```"
     },
     {
       "id": 1,
       "subject": "Task 1: WebSocket Broadcast Infrastructure",
-      "status": "pending",
-      "blockedBy": [0],
+      "status": "complete",
+      "blockedBy": [
+        0
+      ],
       "description": "**Goal:** Create WebSocket connection manager and hook into audit.log_event() for real-time broadcast.\n\n```json:metadata\n{\"files\": [\"institutional_memory/dashboard/broadcast.py\", \"institutional_memory/dashboard/server.py\", \"institutional_memory/audit.py\", \"tests/test_broadcast.py\"], \"verifyCommand\": \"uv run pytest tests/test_broadcast.py -v\", \"acceptanceCriteria\": [\"WS clients receive audit events\", \"Backfill on connect\", \"Multi-client broadcast\"]}\n```"
     },
     {
       "id": 2,
       "subject": "Task 2: REST API Endpoints (Health, Stats, Queries)",
-      "status": "pending",
-      "blockedBy": [0],
+      "status": "complete",
+      "blockedBy": [
+        0
+      ],
       "description": "**Goal:** Implement REST endpoints for system health, ChromaDB stats, and recent search queries.\n\n```json:metadata\n{\"files\": [\"institutional_memory/dashboard/health.py\", \"institutional_memory/dashboard/server.py\", \"tests/test_dashboard_api.py\"], \"verifyCommand\": \"uv run pytest tests/test_dashboard_api.py -v\", \"acceptanceCriteria\": [\"Health endpoint works\", \"Stats endpoint works\", \"Recent queries endpoint works\"]}\n```"
     },
     {
       "id": 3,
       "subject": "Task 3: Frontend WebSocket Hook & Event Context",
-      "status": "pending",
-      "blockedBy": [0, 1],
+      "status": "complete",
+      "blockedBy": [
+        0,
+        1
+      ],
       "description": "**Goal:** React context + hook for WebSocket connection, reconnection, and event distribution.\n\n```json:metadata\n{\"files\": [\"dashboard-ui/src/hooks/useWebSocket.ts\", \"dashboard-ui/src/lib/eventLabels.ts\", \"dashboard-ui/src/context/EventContext.tsx\"], \"verifyCommand\": \"browser console check\", \"acceptanceCriteria\": [\"Auto-reconnect works\", \"Backfill loads\", \"Connection status exposed\", \"Event labels correct\"]}\n```"
     },
     {
       "id": 4,
       "subject": "Task 4: System Status Strip Component",
-      "status": "pending",
-      "blockedBy": [3],
+      "status": "complete",
+      "blockedBy": [
+        3
+      ],
       "description": "**Goal:** Top bar showing Slack/Chroma/Ollama/Listener health with colored dots + last event time.\n\n```json:metadata\n{\"files\": [\"dashboard-ui/src/components/StatusStrip.tsx\"], \"verifyCommand\": \"visual browser check\", \"acceptanceCriteria\": [\"Colored health dots\", \"Polls health endpoint\", \"Live last event time\", \"Pulse animation\"]}\n```"
     },
     {
       "id": 5,
       "subject": "Task 5: Animated Pipeline Flow",
-      "status": "pending",
-      "blockedBy": [3],
-      "description": "**Goal:** SVG pipeline (INBOX→EMBED→CHROMA→SEARCH→SLACK) with animated data packets on events.\n\n```json:metadata\n{\"files\": [\"dashboard-ui/src/components/PipelineFlow.tsx\"], \"verifyCommand\": \"trigger log_event and observe animation\", \"acceptanceCriteria\": [\"5 nodes rendered\", \"Idle pulse animation\", \"Event triggers glow + packet\", \"Cascading works\"]}\n```"
+      "status": "complete",
+      "blockedBy": [
+        3
+      ],
+      "description": "**Goal:** SVG pipeline (INBOX\u2192EMBED\u2192CHROMA\u2192SEARCH\u2192SLACK) with animated data packets on events.\n\n```json:metadata\n{\"files\": [\"dashboard-ui/src/components/PipelineFlow.tsx\"], \"verifyCommand\": \"trigger log_event and observe animation\", \"acceptanceCriteria\": [\"5 nodes rendered\", \"Idle pulse animation\", \"Event triggers glow + packet\", \"Cascading works\"]}\n```"
     },
     {
       "id": 6,
       "subject": "Task 6: Live Telemetry Feed",
-      "status": "pending",
-      "blockedBy": [3],
+      "status": "complete",
+      "blockedBy": [
+        3
+      ],
       "description": "**Goal:** Scrolling event feed with curated labels, color coding, and expandable JSON.\n\n```json:metadata\n{\"files\": [\"dashboard-ui/src/components/LiveFeed.tsx\"], \"verifyCommand\": \"trigger events and check feed\", \"acceptanceCriteria\": [\"15 events visible\", \"Color coded\", \"Slide-in animation\", \"Expandable JSON\"]}\n```"
     },
     {
       "id": 7,
       "subject": "Task 7: Relevance Distribution Chart",
-      "status": "pending",
-      "blockedBy": [3],
+      "status": "complete",
+      "blockedBy": [
+        3
+      ],
       "description": "**Goal:** Tremor AreaChart showing cosine scores over time with threshold line.\n\n```json:metadata\n{\"files\": [\"dashboard-ui/src/components/RelevanceChart.tsx\"], \"verifyCommand\": \"run searches and check chart\", \"acceptanceCriteria\": [\"Area chart renders\", \"Threshold line visible\", \"Real-time updates\", \"Empty state works\"]}\n```"
     },
     {
       "id": 8,
       "subject": "Task 8: Recent Queries Table & Knowledge Base Status",
-      "status": "pending",
-      "blockedBy": [3],
-      "description": "**Goal:** Bottom row panels — queries table with score colors + KB stats panel.\n\n```json:metadata\n{\"files\": [\"dashboard-ui/src/components/RecentQueries.tsx\", \"dashboard-ui/src/components/KnowledgeBase.tsx\"], \"verifyCommand\": \"visual check all panels\", \"acceptanceCriteria\": [\"Queries table renders\", \"Score colors correct\", \"KB stats show\", \"KB refreshes on ingest\", \"Grid layout complete\"]}\n```"
+      "status": "complete",
+      "blockedBy": [
+        3
+      ],
+      "description": "**Goal:** Bottom row panels \u2014 queries table with score colors + KB stats panel.\n\n```json:metadata\n{\"files\": [\"dashboard-ui/src/components/RecentQueries.tsx\", \"dashboard-ui/src/components/KnowledgeBase.tsx\"], \"verifyCommand\": \"visual check all panels\", \"acceptanceCriteria\": [\"Queries table renders\", \"Score colors correct\", \"KB stats show\", \"KB refreshes on ingest\", \"Grid layout complete\"]}\n```"
     },
     {
       "id": 9,
       "subject": "Task 9: Production Build & Serve",
-      "status": "pending",
-      "blockedBy": [4, 5, 6, 7, 8],
-      "description": "**Goal:** Configure prod build so FastAPI serves built React as static files — single process.\n\n```json:metadata\n{\"files\": [\"institutional_memory/dashboard/server.py\", \"dashboard-ui/.gitignore\", \".gitignore\"], \"verifyCommand\": \"npm run build && uv run python -m institutional_memory.dashboard.server\", \"acceptanceCriteria\": [\"Build outputs correctly\", \"Static serving works\", \"API routes preserved\", \"No CORS issues\"]}\n```"
+      "status": "complete",
+      "blockedBy": [
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "description": "**Goal:** Configure prod build so FastAPI serves built React as static files \u2014 single process.\n\n```json:metadata\n{\"files\": [\"institutional_memory/dashboard/server.py\", \"dashboard-ui/.gitignore\", \".gitignore\"], \"verifyCommand\": \"npm run build && uv run python -m institutional_memory.dashboard.server\", \"acceptanceCriteria\": [\"Build outputs correctly\", \"Static serving works\", \"API routes preserved\", \"No CORS issues\"]}\n```"
     }
   ],
   "lastUpdated": "2026-05-16T00:00:00Z"

@@ -287,6 +287,7 @@
       font-size: 12px;
     }
   </style>
+  <link rel="stylesheet" href="/static/controls.css" />
 </head>
 <body>
   <div class="wrap">
@@ -317,6 +318,13 @@
           <div class="panel-header">
             <span class="panel-label">inbox</span>
             <button type="button" class="btn-sm" id="btn-check-inbox" onclick="window.location.href='/inbox'">check inbox</button>
+          </div>
+          <div class="inbox-controls">
+            <div class="search-wrap">
+              <input class="search-input" id="inbox-search" type="search" placeholder="Search inbox..." autocomplete="off" />
+              <button class="search-clear" id="inbox-search-clear" type="button" aria-label="Clear search">X</button>
+            </div>
+            <div class="filter-bar" id="inbox-filter-bar"></div>
           </div>
           <div class="list" id="inbox-list"></div>
         </div>
@@ -368,6 +376,14 @@
     const POLL_MS = 8000;
     let lastFetch = Date.now();
     let auditExpanded = new Set();
+    const INBOX_FILTERS = [
+      ["all", "All"], ["draft", "Draft"], ["policy", "Policy"],
+      ["contract", "Contract"], ["rfp", "RFP"], ["postmortem", "Postmortem"],
+      ["slack", "Slack"], ["other", "Other"],
+    ];
+    let inboxTypeFilter = "all";
+    let inboxSearchTerm = "";
+    let inboxSearchTimer = null;
 
     function esc(s) {
       const d = document.createElement("div");
@@ -379,6 +395,57 @@
       if (!src) return "";
       const parts = src.split("/");
       return parts[parts.length - 1] || src;
+    }
+
+    function renderInboxFilters() {
+      document.getElementById("inbox-filter-bar").innerHTML = INBOX_FILTERS
+        .map(([val, label]) =>
+          `<button type="button" class="filter-btn ${val === inboxTypeFilter ? "active" : ""}" data-filter="${esc(val)}">${esc(label)}</button>`
+        ).join("");
+      document.querySelectorAll("#inbox-filter-bar .filter-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          inboxTypeFilter = btn.dataset.filter || "all";
+          renderInboxFilters();
+          applyInboxFilters();
+        });
+      });
+    }
+
+    function applyInboxFilters() {
+      const rows = [...document.querySelectorAll("#inbox-list .list-item")];
+      let visible = 0;
+      rows.forEach((row) => {
+        const typeOk = inboxTypeFilter === "all" || row.dataset.type === inboxTypeFilter;
+        const textOk = !inboxSearchTerm || (row.dataset.search || "").includes(inboxSearchTerm);
+        row.hidden = !(typeOk && textOk);
+        if (!row.hidden) visible++;
+      });
+      const old = document.querySelector("#inbox-list .filtered-empty");
+      if (old) old.remove();
+      if (rows.length && !visible) {
+        document.getElementById("inbox-list").insertAdjacentHTML("beforeend",
+          '<div class="filtered-empty">No inbox items match filters</div>');
+      }
+    }
+
+    function setupInboxSearch() {
+      const input = document.getElementById("inbox-search");
+      const clear = document.getElementById("inbox-search-clear");
+      input.addEventListener("input", () => {
+        clear.classList.toggle("visible", input.value.length > 0);
+        clearTimeout(inboxSearchTimer);
+        inboxSearchTimer = setTimeout(() => {
+          inboxSearchTerm = input.value.trim().toLowerCase();
+          applyInboxFilters();
+        }, 200);
+      });
+      clear.addEventListener("click", () => {
+        input.value = "";
+        inboxSearchTerm = "";
+        clear.classList.remove("visible");
+        applyInboxFilters();
+        input.focus();
+      });
     }
 
     function buildSparkbar(events) {
@@ -455,7 +522,10 @@
           if (item.matched_source) pills.push(`<span class="source-pill">${esc(sourceBasename(item.matched_source))}</span>`);
           if (item.score != null) pills.push(`<span class="score-pill">${esc(Number(item.score).toFixed(2))}</span>`);
           if (item.slack_channel && item.status === "sent") pills.push(`<span class="channel-pill">${esc(item.slack_channel)}</span>`);
-          return `<div class="list-item clickable" onclick="window.location.href='/inbox#${encodeURIComponent(item.path)}'">
+          const itemType = item.type || "other";
+          const searchText = [item.path, item.name, item.title, item.matched_source, sourceBasename(item.matched_source), item.summary]
+            .filter(Boolean).map(s => String(s).toLowerCase()).join(" ");
+          return `<div class="list-item clickable" data-type="${esc(itemType)}" data-search="${esc(searchText)}" onclick="window.location.href='/inbox#${encodeURIComponent(item.path)}'">
             <div class="icon-sq ${esc(item.status)}"></div>
             <div class="item-body">
               <div class="item-title">${esc(item.title)} <span class="badge ${esc(item.status)}">${esc(item.status)}</span></div>
@@ -467,6 +537,7 @@
           </div>`;
         })
         .join("");
+      applyInboxFilters();
     }
 
     function renderAudit(events) {
@@ -589,14 +660,20 @@
       statusEl.classList.remove("fade");
       statusEl.innerHTML = '<span class="ingest-spinner">...</span>';
       try {
-        const data = await fetch("/api/run/ingest", { method: "POST" }).then((r) => r.json());
-        const msg = data.added > 0
-          ? `✓ ${data.added} doc${data.added === 1 ? "" : "s"} added`
-          : "✓ already up to date";
-        statusEl.textContent = msg;
-        refresh();
+        const response = await fetch("/api/run/ingest", { method: "POST" });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        const added = Number(data.added || 0);
+        statusEl.textContent = `✓ ${added} doc${added === 1 ? "" : "s"} added`;
+        await Promise.all([
+          fetch("/api/stats").then((r) => r.json()).then(renderStats),
+          fetch("/api/corpus").then((r) => r.json()).then(renderCorpus),
+        ]);
       } catch (e) {
-        statusEl.textContent = "✗ ingest failed";
+        statusEl.classList.add("error");
+        statusEl.textContent = `✗ ${e.message || "ingest failed"}`;
       } finally {
         btn.disabled = false;
         setTimeout(() => statusEl.classList.add("fade"), 4000);
@@ -606,6 +683,8 @@
 
     document.getElementById("btn-reingest").addEventListener("click", runReingest);
 
+    renderInboxFilters();
+    setupInboxSearch();
     refresh();
     setInterval(refresh, POLL_MS);
     setInterval(setUpdated, 1000);

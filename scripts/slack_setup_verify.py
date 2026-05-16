@@ -75,8 +75,19 @@ def main() -> int:
     ok = all(bool(step.get("ok")) for step in steps)
     print(json.dumps({"ok": ok, "steps": steps}, indent=2))
     if ok:
-        print("\nListener connect OK. Start for real: tmux new -s slack && uv run python scripts/slack_listener.py")
-        print("Golden test: @Bot in #institutional-memory with RFP / clause 7.4 question.")
+        print("\nListener connect OK for 8s probe. Keep it running for @mentions:")
+        print("  ./scripts/start_slack_listener.sh")
+        print("  or: systemctl --user enable --now memory-claw-slack-listener.service")
+        print("  status: uv run python scripts/slack_listener_status.py")
+        status_code, status_out = _run(
+            [uv, "run", "python", "scripts/slack_listener_status.py"], timeout=15
+        )
+        if status_code != 0:
+            print("\nNote: listener is NOT running after verify (expected). Start it before Slack @mention tests.")
+        else:
+            print(status_out)
+        print("\nGolden test (see docs/asus-setup-guide.md Step 10):")
+        print("  @Memory Claw in #institutional-memory — Vantara / rate limit / .env scenarios")
     return 0 if ok else 1
 
 
