@@ -494,3 +494,86 @@ def test_handle_bot_message_skipped():
         result = handle_listener_event(event, client, state)
 
     assert result["status"] == "skipped"
+
+
+# --- Group channel (channel_type) tests ---
+
+
+def test_group_channel_without_mention_skipped():
+    state = _make_state(allowed_channels={"C100"})
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "channel_type": "channel",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "What was our Q3 strategy?",
+    }
+
+    with patch("institutional_memory.listener.log_event"):
+        result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "not_mentioned_in_channel"
+    assert len(client.posted) == 0
+
+
+def test_group_channel_with_mention_replies():
+    state = _make_state(allowed_channels=set())
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C999",
+        "channel_type": "channel",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "<@UBOT> what is our retention policy?",
+    }
+
+    hits = [{"score": 0.75, "text": "Retention policy doc", "source": "retention.md"}]
+    with patch("institutional_memory.listener.search_memory", return_value=hits):
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert len(client.posted) == 1
+
+
+def test_private_group_channel_without_mention_skipped():
+    state = _make_state(allowed_channels={"C100"})
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "channel_type": "group",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "What was our Q3 strategy?",
+    }
+
+    with patch("institutional_memory.listener.log_event"):
+        result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "not_mentioned_in_channel"
+
+
+def test_group_channel_mention_bypasses_allowlist():
+    state = _make_state(allowed_channels={"C100"})
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C_NOT_IN_ALLOWLIST",
+        "channel_type": "channel",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "<@UBOT> help",
+    }
+
+    hits = [{"score": 0.70, "text": "Help doc", "source": "help.md"}]
+    with patch("institutional_memory.listener.search_memory", return_value=hits):
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"

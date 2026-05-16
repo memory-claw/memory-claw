@@ -308,9 +308,15 @@ def handle_listener_event(
 
     is_mention = _is_mention(event, state.bot_user_id)
     is_active_thread = (channel, event.get("thread_ts", "")) in state.active_threads
+    is_group_channel = event.get("channel_type") in ("channel", "group")
+
+    if is_group_channel and not is_mention:
+        log_event("listener_skip", channel=channel, reason="not_mentioned_in_channel")
+        return {"status": "skipped", "reason": "not_mentioned_in_channel"}
 
     if (
-        not is_mention
+        not is_group_channel
+        and not is_mention
         and not is_active_thread
         and not state.allow_all_channels
         and channel not in state.allowed_channels
