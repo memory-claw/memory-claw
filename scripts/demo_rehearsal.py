@@ -32,7 +32,7 @@ def main() -> int:
             check=True,
         )
     rfp = run_json("search-memory", "--query", "RFP liability indemnification clause")
-    silent = run_json("search-memory", "--query", "clinical trial dermatology placebo", "--threshold", "0.9")
+    silent = run_json("search-memory", "--query", "clinical trial dermatology placebo")
     ok = isinstance(rfp, list) and rfp and rfp[0].get("source") == "corpus/2023_rfp_postmortem.txt" and silent == []
     print(json.dumps({"rfp": rfp[:1] if isinstance(rfp, list) else rfp, "silent": silent, "ok": ok}, ensure_ascii=False))
     return 0 if ok else 1
