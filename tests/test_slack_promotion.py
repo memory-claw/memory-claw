@@ -287,3 +287,135 @@ def test_third_party_bot_messages_are_kept_in_card(tmp_path, monkeypatch):
     assert "PagerDuty alert" in text
     assert "roll back the checkout deploy" in text
     assert "Memory Claw reply should not be indexed" not in text
+
+
+def test_related_sources_from_audit_are_best_effort(tmp_path, monkeypatch):
+    company_corpus, _ = _patch_promotion_paths(monkeypatch, tmp_path)
+    audit_log = tmp_path / "audit_log.jsonl"
+    monkeypatch.setattr(slack_promotion, "AUDIT_LOG", audit_log)
+    audit_log.write_text(
+        json.dumps({
+            "type": "listener_reply",
+            "channel": "C123",
+            "thread_ts": "1710000000.000000",
+            "sources": ["company/corpus/vendor_terms.md"],
+        })
+        + "\n"
+        + "{not json}\n",
+        encoding="utf-8",
+    )
+
+    result = slack_promotion.handle_reaction_event(
+        _reaction_event(),
+        client=FakePromotionClient(),
+        allowed_channels={"C123"},
+        rate_limiter=slack_promotion.PromotionRateLimiter(),
+        bot_user_id="UBOT",
+    )
+
+    assert result["status"] == "promoted"
+    assert result["related_sources_mode"] == "matched"
+    card = company_corpus / "slack" / "promoted" / "C123_1710000000.000000.md"
+    assert "company/corpus/vendor_terms.md" in card.read_text(encoding="utf-8")
+
+
+def test_missing_audit_file_does_not_block_promotion(tmp_path, monkeypatch):
+    company_corpus, _ = _patch_promotion_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(slack_promotion, "AUDIT_LOG", tmp_path / "missing_audit_log.jsonl")
+
+    result = slack_promotion.handle_reaction_event(
+        _reaction_event(),
+        client=FakePromotionClient(),
+        allowed_channels={"C123"},
+        rate_limiter=slack_promotion.PromotionRateLimiter(),
+        bot_user_id="UBOT",
+    )
+
+    assert result["status"] == "promoted"
+    assert result["related_sources_mode"] == "none"
+    card = company_corpus / "slack" / "promoted" / "C123_1710000000.000000.md"
+    assert "## Related Sources" not in card.read_text(encoding="utf-8")
+
+
+def test_related_source_lookup_uses_bounded_audit_tail(tmp_path, monkeypatch):
+    company_corpus, _ = _patch_promotion_paths(monkeypatch, tmp_path)
+    audit_log = tmp_path / "audit_log.jsonl"
+    monkeypatch.setattr(slack_promotion, "AUDIT_LOG", audit_log)
+    monkeypatch.setattr(slack_promotion, "AUDIT_LOOKBACK_LINES", 2)
+    old_match = json.dumps({
+        "type": "listener_reply",
+        "channel": "C123",
+        "thread_ts": "1710000000.000000",
+        "sources": ["company/corpus/old_source.md"],
+    })
+    audit_log.write_text(
+        old_match
+        + "\n"
+        + json.dumps({"type": "listener_skip", "channel": "C123"})
+        + "\n"
+        + json.dumps({"type": "listener_skip", "channel": "C123"})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = slack_promotion.handle_reaction_event(
+        _reaction_event(),
+        client=FakePromotionClient(),
+        allowed_channels={"C123"},
+        rate_limiter=slack_promotion.PromotionRateLimiter(),
+        bot_user_id="UBOT",
+    )
+
+    assert result["status"] == "promoted"
+    card = company_corpus / "slack" / "promoted" / "C123_1710000000.000000.md"
+    assert "company/corpus/old_source.md" not in card.read_text(encoding="utf-8")
+
+
+def test_user_rate_limit_blocks_second_distinct_thread(tmp_path, monkeypatch):
+    _patch_promotion_paths(monkeypatch, tmp_path)
+    limiter = slack_promotion.PromotionRateLimiter(user_cooldown_seconds=60)
+
+    first = slack_promotion.handle_reaction_event(
+        _reaction_event(),
+        client=FakePromotionClient(),
+        allowed_channels={"C123"},
+        rate_limiter=limiter,
+        bot_user_id="UBOT",
+    )
+    second = slack_promotion.handle_reaction_event(
+        _reaction_event(item={"type": "message", "channel": "C123", "ts": "1710000020.000000"}),
+        client=FakePromotionClient(messages=[
+            {"ts": "1710000020.000000", "user": "U123", "text": "Another useful thread"},
+        ]),
+        allowed_channels={"C123"},
+        rate_limiter=limiter,
+        bot_user_id="UBOT",
+    )
+
+    assert first["status"] == "promoted"
+    assert second == {"status": "ignored", "reason": "rate_limited_user"}
+
+
+def test_global_rate_limit_blocks_burst(tmp_path, monkeypatch):
+    _patch_promotion_paths(monkeypatch, tmp_path)
+    limiter = slack_promotion.PromotionRateLimiter(user_cooldown_seconds=0, global_max_per_minute=1)
+
+    first = slack_promotion.handle_reaction_event(
+        _reaction_event(user="U111"),
+        client=FakePromotionClient(),
+        allowed_channels={"C123"},
+        rate_limiter=limiter,
+        bot_user_id="UBOT",
+    )
+    second = slack_promotion.handle_reaction_event(
+        _reaction_event(user="U222", item={"type": "message", "channel": "C123", "ts": "1710000020.000000"}),
+        client=FakePromotionClient(messages=[
+            {"ts": "1710000020.000000", "user": "U222", "text": "Another useful thread"},
+        ]),
+        allowed_channels={"C123"},
+        rate_limiter=limiter,
+        bot_user_id="UBOT",
+    )
+
+    assert first["status"] == "promoted"
+    assert second == {"status": "ignored", "reason": "rate_limited_global"}
