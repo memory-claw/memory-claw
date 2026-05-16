@@ -1,51 +1,42 @@
 # TEAM DIRECTORY
-## Collective Memory Agent — Employee Personas Reference
-
-**Purpose:** Reference document for agent persona grounding. All names used in mock data.
+## Collective Memory Agent — Persona Reference
 
 ---
 
-## Active Team Members
-
-### Sarah Chen
-**Title:** Legal Counsel  
-**Department:** Legal  
-**Tenure:** 9 years  
-**Known For:** Revised NHS liability clause (Q1 2024). Primary legal reviewer for all regulated-sector bids. If there's a contract clause issue, Sarah has probably seen it before.  
-**Key Documents:** LEGAL-MEMO-2024-003 (liability clause revision), multiple DPA sign-offs  
+### Marcus Chen
+**Title:** Infrastructure Lead  
+**Tenure:** 4 years (founding team)  
+**Known For:** Runs all AWS infra, on-call for P0s, built the rate limiting middleware after the 2023 outage. If something breaks at 2am, Marcus fixes it. Has introduced more internal tooling than anyone else on the team.  
+**Key Incidents:** API Outage Aug 2023, AWS GPU bill Nov 2022  
 
 ---
 
-### Tom Walker
-**Title:** Sales Director  
-**Department:** Sales  
-**Tenure:** 7 years  
-**Known For:** High win rate, occasional tendency to move fast on commercial terms. Led both the 2022 NHS SouthWest failure and the 2024 NHS Midlands win.  
-**Key Documents:** NHS-SW-2022-DIG-047 (failed bid), NHS-MID-2024-DIG-012 (won bid), FinCo bid 2023 (margin collapse)  
+### Priya Patel
+**Title:** CTO  
+**Tenure:** 4 years (co-founder)  
+**Known For:** Sets engineering policy after incidents. Wrote the cloud cost policy and the enterprise deal process. Does the hard conversations with the board when something goes wrong.  
+**Key Incidents:** Authored postmortems for Helix deal and GPU bill  
 
 ---
 
-### Emma Patel
-**Title:** Procurement Manager  
-**Department:** Procurement  
-**Tenure:** 5 years  
-**Known For:** Fast, practical, sometimes moves quicker than process allows. Approved DataVault in 2021 without completed security checks.  
-**Key Documents:** DataVault onboarding approval 2021  
+### Jake Morrison
+**Title:** Product Manager  
+**Tenure:** 3 years  
+**Known For:** Moves fast, occasionally skips process gates. Approved the /export PR without flagging infrastructure risk. Spun up the GPU instances in 2022. Genuinely good at shipping — the gaps are usually process, not intent.  
+**Key Incidents:** /export endpoint PR approval, GPU instance cost incident  
 
 ---
 
-### James Liu
-**Title:** Delivery Lead  
-**Department:** Delivery  
-**Tenure:** 8 years  
-**Known For:** Delivery quality is excellent. Has introduced the most internal process improvements following failures. Introduced Delivery Pricing Sign-Off policy after FinCo.  
-**Key Documents:** FinCo postmortem, Bid Pricing Sign-Off Policy v1.0  
+### Alex Rivera
+**Title:** Full-Stack Engineer  
+**Tenure:** 2 years (resigned Nov 2023, cited burnout)  
+**Known For:** Built the /export endpoint. Carried 70% of Helix delivery alongside Marcus. The Helix postmortem notes Alex's resignation as a direct consequence of the underscoped deal.  
+**Key Incidents:** Built /export endpoint, Helix delivery burnout  
 
 ---
 
-### Rachel Moore
-**Title:** Compliance Manager  
-**Department:** Compliance  
-**Tenure:** 6 years  
-**Known For:** Authors most postmortems. Introduced Vendor Security Gate after DataVault breach. Usually the person who documents what went wrong.  
-**Key Documents:** DataVault postmortem, Vendor Security Gate Policy, NHS SouthWest postmortem  
+### Sarah Kim
+**Title:** Sales / Growth  
+**Tenure:** 2 years  
+**Known For:** Strong at closing enterprise deals. The Helix deal was hers. The pattern is closing fast without technical scoping — not malicious, just optimistic. The new enterprise deal process was introduced specifically around her workflow.  
+**Key Incidents:** Helix Capital deal 2023  

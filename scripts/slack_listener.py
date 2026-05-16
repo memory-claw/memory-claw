@@ -73,6 +73,18 @@ def main() -> int:
     if not SLACK_APP_TOKEN:
         print(json.dumps({"status": "error", "error": "SLACK_APP_TOKEN missing"}), file=sys.stderr)
         return 1
+    if SLACK_APP_TOKEN == "xapp-your-token-here":
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error": "SLACK_APP_TOKEN is still the .env.example placeholder",
+                    "hint": "api.slack.com/apps → Socket Mode → app-level token (connections:write)",
+                }
+            ),
+            file=sys.stderr,
+        )
+        return 1
     if not SLACK_BOT_TOKEN:
         print(json.dumps({"status": "error", "error": "SLACK_BOT_TOKEN missing"}), file=sys.stderr)
         return 1
