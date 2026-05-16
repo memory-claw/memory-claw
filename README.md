@@ -61,6 +61,8 @@ ASUS_SSH_KEY=~/.ssh/asus_deploy scripts/deploy_asus.sh
 
 Each push to `codex/institutional-memory-engine` runs `scripts/deploy_asus.sh`
 from GitHub Actions over Tailscale. The script fetches that branch on ASUS and
-checks it out over the old `main` checkout. Override `ASUS_USER_HOST`,
-`ASUS_TAILSCALE_IP`, `ASUS_REPO`, `ASUS_BRANCH`, or `ASUS_SSH_KEY` for manual
-runs if the ASUS checkout differs from `~/memory-claw`.
+checks it out over the old `main` checkout. It also updates the OpenClaw
+workspace with `SOUL.md`, `HEARTBEAT.md`, and the institutional-memory skill.
+Override `ASUS_USER_HOST`, `ASUS_TAILSCALE_IP`, `ASUS_REPO`, `ASUS_BRANCH`,
+`ASUS_SSH_KEY`, or `OPENCLAW_WORKSPACE` for manual runs if the ASUS checkout or
+OpenClaw workspace differs from `~/memory-claw` and `~/.openclaw/workspace`.

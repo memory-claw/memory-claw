@@ -10,6 +10,10 @@ def test_deploy_script_uses_tailscale_and_ssh_key_without_password():
     assert "ASUS_BRANCH" in script
     assert "git fetch origin" in script
     assert "git checkout -B" in script
+    assert ".openclaw/workspace" in script
+    assert "cp SOUL.md" in script
+    assert "cp HEARTBEAT.md" in script
+    assert "cp skills/institutional-memory/SKILL.md" in script
     assert "uv sync" in script
     assert "scripts/dgx_check.py --skip-model-smoke --skip-backup-video" in script
     assert "sshpass" not in script
@@ -34,5 +38,6 @@ def test_readme_documents_asus_push_deploy():
     assert "scripts/deploy_asus.sh" in readme
     assert "ASUS_SSH_KEY" in readme
     assert "ASUS_BRANCH" in readme
+    assert "OpenClaw workspace" in readme
     assert "TS_OAUTH_CLIENT_ID" in readme
     assert "tailscale ping 100.68.221.47" in readme
