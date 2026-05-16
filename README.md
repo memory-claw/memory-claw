@@ -164,6 +164,26 @@ After adding a new draft/thread to check:
 Then ask OpenClaw to check the inbox. The bot posts to Slack only when retrieved
 memory passes the relevance threshold.
 
+## Slack Behavior
+
+Current Slack support is outbound only. `SLACK_BOT_TOKEN` lets `./bin/imem
+send-slack` post OpenClaw's final memory-backed answer into `SLACK_CHANNEL`.
+It does not read Slack channel history yet.
+
+The bot should not post raw ingested Slack messages. It posts only when an
+active inbox draft/thread matches useful institutional memory from `corpus/`.
+The message should summarize the relevant context and include source
+attribution, for example `corpus/2023_rfp_postmortem.txt`.
+
+Planned Slack ingestion should use Slack as an input source:
+
+- resolved historical Slack threads belong in `corpus/slack/`, then run
+  `uv run python scripts/ingest_corpus.py --force`
+- active Slack messages or threads that need help belong in `inbox/`, then ask
+  OpenClaw to check the inbox
+- noise or casual threads should be marked `skipped_no_relevant_memory` and
+  should not send Slack
+
 ## ASUS Run
 
 From OpenClaw, ask:

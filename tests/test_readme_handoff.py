@@ -37,6 +37,17 @@ def test_readme_documents_company_data_intake():
     assert "./bin/imem list-new-drafts" in readme
 
 
+def test_readme_documents_current_slack_behavior():
+    readme = Path("README.md").read_text(encoding="utf-8")
+
+    assert "## Slack Behavior" in readme
+    assert "Current Slack support is outbound only" in readme
+    assert "does not read Slack channel history yet" in readme
+    assert "should not post raw ingested Slack messages" in readme
+    assert "corpus/slack/" in readme
+    assert "skipped_no_relevant_memory" in readme
+
+
 def test_plan_names_current_repo_path():
     plan = Path("2026-05-15-institutional-memory-engine.md").read_text(encoding="utf-8")
 
