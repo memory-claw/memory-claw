@@ -163,6 +163,32 @@ def test_compose_slack_answer_falls_back_when_model_omits_source(monkeypatch):
     assert "launch_review.md (76%)" in answer
 
 
+def test_compose_slack_answer_falls_back_when_advice_off_model_gives_advice(monkeypatch):
+    import institutional_memory.response_composer as response_composer
+
+    class AdviceClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        def chat(self, **_kwargs):
+            return {
+                "message": {
+                    "content": (
+                        "Suggested next move:\n"
+                        "- Review this before committing.\n\n"
+                        "Sources:\n1. launch_review.md (76%)"
+                    )
+                }
+            }
+
+    monkeypatch.setattr(response_composer.ollama, "Client", AdviceClient)
+
+    answer = compose_slack_answer("Need context", [_hit()], intent="context", advice_mode="off")
+
+    assert "What memory says:" in answer
+    assert "Suggested next move" not in answer
+
+
 def test_compose_slack_answer_preserves_footer_on_model_response(monkeypatch):
     import institutional_memory.response_composer as response_composer
 

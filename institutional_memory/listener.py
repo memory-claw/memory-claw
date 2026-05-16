@@ -237,6 +237,7 @@ class ListenerState:
     active_threads: set[tuple[str, str]] = field(default_factory=set)
     thread_advice_modes: dict[tuple[str, str], str] = field(default_factory=dict)
     thread_footer_shown: set[tuple[str, str]] = field(default_factory=set)
+    thread_footer_signatures: dict[tuple[str, str], tuple[str, ...]] = field(default_factory=dict)
     thread_advice_offer_pending: set[tuple[str, str]] = field(default_factory=set)
     thread_source_refs: dict[tuple[str, str], list[dict[str, Any]]] = field(default_factory=dict)
     thread_full_source_cooldowns: dict[tuple[str, str, int], float] = field(default_factory=dict)
@@ -310,6 +311,19 @@ def _handle_source_command(
     return (rendered["text"], cooldown_key)
 
 
+def _footer_signature(hits: list[dict[str, Any]], advice_mode: str) -> tuple[str, ...]:
+    commands: list[str] = []
+    if advice_mode == "offer":
+        commands.append("advice")
+    for index, hit in enumerate(hits[:MAX_HITS], start=1):
+        access = str(hit.get("access", ""))
+        if access in {"excerpt", "share"}:
+            commands.append(f"show source {index}")
+        if access == "share":
+            commands.append(f"show full source {index}")
+    return tuple(commands)
+
+
 def handle_listener_event(
     event: dict[str, Any],
     client: Any,
@@ -359,7 +373,11 @@ def handle_listener_event(
             log_event("listener_error", channel=channel, error=str(exc))
             return {"status": "error", "error": str(exc)}
 
-    source_result = _handle_source_command(command_text, key, state)
+    try:
+        source_result = _handle_source_command(command_text, key, state)
+    except Exception as exc:
+        log_event("listener_error", channel=channel, error=str(exc))
+        return {"status": "error", "error": str(exc)}
     if source_result:
         source_reply, cooldown_key = source_result
         advice_mode = state.thread_advice_modes.get(key, "offer")
@@ -447,7 +465,12 @@ def handle_listener_event(
     triggered_by = "mention" if is_mention else ("thread" if is_active_thread else "unprompted")
     intent = detect_response_intent(command_text)
     advice_mode = state.thread_advice_modes.get(key, "offer")
-    include_footer = advice_mode == "offer" and key not in state.thread_footer_shown
+    footer_signature = _footer_signature(visible_hits, advice_mode)
+    include_footer = (
+        advice_mode == "offer"
+        and bool(footer_signature)
+        and state.thread_footer_signatures.get(key) != footer_signature
+    )
     reply_text = compose_slack_answer(
         query,
         visible_hits,
@@ -466,6 +489,7 @@ def handle_listener_event(
     state.thread_source_refs[key] = visible_hits[:MAX_HITS]
     if include_footer:
         state.thread_footer_shown.add(key)
+        state.thread_footer_signatures[key] = footer_signature
         if '"advice"' in reply_text:
             state.thread_advice_offer_pending.add(key)
     sources = [h["source"] for h in visible_hits[:MAX_HITS]]

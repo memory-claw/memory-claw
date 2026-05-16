@@ -114,6 +114,8 @@ def compose_slack_answer(
     text = _truncate_model_reply(content.strip())
     if not _has_required_source_citation(text, hits[:3]):
         return fallback
+    if advice_mode == "off" and _contains_advice(text):
+        return fallback
     footer = _footer(hits[:3], advice_mode=advice_mode) if include_footer else ""
     if footer and footer not in text:
         return f"{text}\n\n{footer}"
@@ -269,6 +271,21 @@ def _has_required_source_citation(text: str, hits: list[dict[str, Any]]) -> bool
         _display_name(hit).lower() in normalized and f"{_score_percent(hit)}%" in normalized
         for hit in hits
     )
+
+
+def _contains_advice(text: str) -> bool:
+    normalized = text.lower()
+    advice_markers = (
+        "suggested next move",
+        "next move",
+        "recommend",
+        "you should",
+        "we should",
+        "should ",
+        "review this before",
+        "before committing",
+    )
+    return any(marker in normalized for marker in advice_markers)
 
 
 def _truncate_snippet(text: str) -> str:
