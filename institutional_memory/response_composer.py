@@ -14,6 +14,7 @@ AdviceMode = Literal["offer", "on", "off"]
 
 MAX_SNIPPET_CHARS = 220
 MAX_MODEL_REPLY_CHARS = 3000
+MAX_THREAD_TEXT_CHARS = 2000
 
 _ADVICE_TERMS = ("advice", "tips", "next move", "should we", "recommend", "what should")
 _PRECEDENT_TERMS = ("precedent", "last time", "similar prior", "previous example", "happened before")
@@ -110,7 +111,13 @@ def compose_slack_answer(
     content = _response_content(response)
     if not content:
         return fallback
-    return _truncate_model_reply(content.strip())
+    text = _truncate_model_reply(content.strip())
+    if not _has_required_source_citation(text, hits[:3]):
+        return fallback
+    footer = _footer(hits[:3], advice_mode=advice_mode) if include_footer else ""
+    if footer and footer not in text:
+        return f"{text}\n\n{footer}"
+    return text
 
 
 def _context_section(hits: list[dict[str, Any]]) -> str:
@@ -216,7 +223,7 @@ def _messages(
             "role": "user",
             "content": (
                 f"Intent: {intent}\nAdvice mode: {advice_mode}\n\n"
-                f"Thread context:\n{thread_text.strip()}\n\n"
+                f"Thread context:\n{_truncate_thread_text(thread_text)}\n\n"
                 "Memory excerpts:\n"
                 + ("\n".join(excerpts) if excerpts else "No relevant memory available.")
             ),
@@ -243,6 +250,27 @@ def _truncate_model_reply(text: str) -> str:
     return text[:MAX_MODEL_REPLY_CHARS].rstrip() + "\n\n[truncated]"
 
 
+def _truncate_thread_text(text: str) -> str:
+    collapsed = str(text or "").strip()
+    if len(collapsed) <= MAX_THREAD_TEXT_CHARS:
+        return collapsed
+    tail = collapsed[-MAX_THREAD_TEXT_CHARS:]
+    newline_index = tail.find("\n")
+    if newline_index != -1:
+        return tail[newline_index + 1 :]
+    return tail
+
+
+def _has_required_source_citation(text: str, hits: list[dict[str, Any]]) -> bool:
+    if not hits:
+        return True
+    normalized = text.lower()
+    return any(
+        _display_name(hit).lower() in normalized and f"{_score_percent(hit)}%" in normalized
+        for hit in hits
+    )
+
+
 def _truncate_snippet(text: str) -> str:
     collapsed = " ".join(text.split())
     if len(collapsed) <= MAX_SNIPPET_CHARS:
@@ -251,14 +279,18 @@ def _truncate_snippet(text: str) -> str:
 
 
 def _score_percent(hit: dict[str, Any]) -> int:
-    return round(float(hit.get("score", 0.0)) * 100)
+    try:
+        return round(float(hit.get("score", 0.0)) * 100)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _display_name(hit: dict[str, Any]) -> str:
     display = str(hit.get("display_name") or "").strip()
     if display:
         return display
-    return Path(str(hit.get("source", "unknown"))).name
+    name = Path(str(hit.get("source", "unknown"))).name
+    return name or "unknown"
 
 
 def _join_english(items: list[str]) -> str:
