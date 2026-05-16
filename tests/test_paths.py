@@ -48,3 +48,25 @@ def test_safe_corpus_blocks_traversal():
 
     with pytest.raises(PathNotAllowedError):
         safe_corpus_path("company/corpus/../../.env")
+
+
+def test_safe_evidence_allows_json_under_company_evidence():
+    from institutional_memory.paths import safe_evidence_path
+
+    assert safe_evidence_path("company/evidence/slack/C123_1710000000.000000.json") == (
+        PROJECT_ROOT / "company/evidence/slack/C123_1710000000.000000.json"
+    ).resolve()
+
+
+def test_safe_evidence_blocks_corpus_path():
+    from institutional_memory.paths import safe_evidence_path
+
+    with pytest.raises(PathNotAllowedError):
+        safe_evidence_path("company/corpus/slack/evidence/C123.json")
+
+
+def test_safe_evidence_rejects_markdown():
+    from institutional_memory.paths import safe_evidence_path
+
+    with pytest.raises(PathNotAllowedError):
+        safe_evidence_path("company/evidence/slack/C123.md")
