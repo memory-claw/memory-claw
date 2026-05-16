@@ -28,6 +28,23 @@ def test_model_smoke_reports_timeout(monkeypatch):
     )
 
 
+def test_default_model_probe_allows_enough_tokens_for_ready(monkeypatch):
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, host):
+            captured["host"] = host
+
+        def chat(self, **kwargs):
+            captured.update(kwargs)
+            return {"message": {"content": "READY"}}
+
+    monkeypatch.setattr(dgx_check.ollama, "Client", FakeClient)
+
+    assert dgx_check.default_model_probe() == "READY"
+    assert captured["options"] == {"num_predict": 64}
+
+
 def test_backup_video_check_rejects_empty_placeholder(tmp_path):
     (tmp_path / "placeholder.mp4").write_bytes(b"")
 

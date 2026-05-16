@@ -40,7 +40,7 @@ def default_model_probe() -> str:
     response = ollama.Client(host=OLLAMA_BASE_URL).chat(
         model=LLM_MODEL,
         messages=[{"role": "user", "content": "Reply with READY."}],
-        options={"num_predict": 8},
+        options={"num_predict": 64},
     )
     return response["message"]["content"]
 

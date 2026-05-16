@@ -41,8 +41,8 @@ if [ -n "${SLACK_BOT_TOKEN:-}" ] || [ -n "${SLACK_CHANNEL:-}" ] || [ -n "$SLACK_
     printf 'SLACK_WEBHOOK_URL=%s\n' "$SLACK_WEBHOOK_URL"
   } >"$REMOTE_ENV_FILE"
   ssh -i "$ASUS_SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ASUS_USER_HOST" \
-    "set -eu; cd $ASUS_REPO; umask 077; cat > .env" <"$REMOTE_ENV_FILE"
+    "set -eu; PATH=\$HOME/.local/bin:\$PATH; cd $ASUS_REPO; umask 077; cat > .env" <"$REMOTE_ENV_FILE"
 fi
 
 ssh -i "$ASUS_SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ASUS_USER_HOST" \
-  "set -eu; cd $ASUS_REPO; git fetch origin \"$ASUS_BRANCH\"; git checkout -B \"$ASUS_BRANCH\" \"origin/$ASUS_BRANCH\"; OPENCLAW_WORKSPACE=$OPENCLAW_WORKSPACE; mkdir -p \"\$OPENCLAW_WORKSPACE/skills/institutional-memory\"; cp SOUL.md \"\$OPENCLAW_WORKSPACE/SOUL.md\"; cp HEARTBEAT.md \"\$OPENCLAW_WORKSPACE/HEARTBEAT.md\"; cp skills/institutional-memory/SKILL.md \"\$OPENCLAW_WORKSPACE/skills/institutional-memory/SKILL.md\"; uv sync; uv run python scripts/dgx_check.py --skip-model-smoke --skip-backup-video"
+  "set -eu; PATH=\$HOME/.local/bin:\$PATH; cd $ASUS_REPO; git fetch origin \"$ASUS_BRANCH\"; git checkout -B \"$ASUS_BRANCH\" \"origin/$ASUS_BRANCH\"; OPENCLAW_WORKSPACE=$OPENCLAW_WORKSPACE; mkdir -p \"\$OPENCLAW_WORKSPACE/skills/institutional-memory\"; cp SOUL.md \"\$OPENCLAW_WORKSPACE/SOUL.md\"; cp HEARTBEAT.md \"\$OPENCLAW_WORKSPACE/HEARTBEAT.md\"; cp skills/institutional-memory/SKILL.md \"\$OPENCLAW_WORKSPACE/skills/institutional-memory/SKILL.md\"; uv sync; uv run python scripts/dgx_check.py --skip-model-smoke --skip-backup-video"
