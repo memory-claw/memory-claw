@@ -18,9 +18,9 @@ GENERIC_QUERY_WORDS = {
     "search",
 }
 
-RFP_SOURCE = "corpus/2023_rfp_postmortem.txt"
-RFP_DRAFT = "inbox/new_rfp_draft.txt"
-SILENT_DRAFT = "inbox/000_silent_clinical_trial_protocol.txt"
+RFP_SOURCE = "company/corpus/2023_rfp_postmortem.txt"
+RFP_DRAFT = "company/inbox/new_rfp_draft.txt"
+SILENT_DRAFT = "company/inbox/000_silent_clinical_trial_protocol.txt"
 
 
 def run(command: list[str], timeout: int = 180) -> dict:

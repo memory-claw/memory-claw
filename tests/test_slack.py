@@ -2,10 +2,20 @@ from institutional_memory import slack
 from slack_sdk.errors import SlackApiError
 
 
-def test_source_attributions_find_corpus_filenames():
-    text = "Review prior bid notes from corpus/2023_rfp_postmortem.txt before sending."
+def test_source_attributions_find_company_corpus_filenames():
+    text = "Review prior bid notes from company/corpus/2023_rfp_postmortem.txt before sending."
 
-    assert slack.source_attributions(text) == ["corpus/2023_rfp_postmortem.txt"]
+    assert slack.source_attributions(text) == ["company/corpus/2023_rfp_postmortem.txt"]
+
+
+def test_source_attributions_find_nested_company_corpus_filenames():
+    text = "Use company/corpus/policies/vendor_terms.md for the approved language."
+
+    assert slack.source_attributions(text) == ["company/corpus/policies/vendor_terms.md"]
+
+
+def test_source_attributions_ignore_legacy_corpus_filenames():
+    assert slack.source_attributions("Review corpus/2023_rfp_postmortem.txt first.") == []
 
 
 def test_source_attributions_ignore_missing_source_filename():

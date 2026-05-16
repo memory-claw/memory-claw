@@ -11,7 +11,7 @@ def test_silent_rehearsal_uses_default_threshold(monkeypatch, capsys):
         if args[0] == "reset-demo":
             return {"status": "reset"}
         if "RFP liability indemnification clause" in args:
-            return [{"source": "corpus/2023_rfp_postmortem.txt"}]
+            return [{"source": "company/corpus/2023_rfp_postmortem.txt"}]
         if "clinical trial dermatology placebo" in args:
             return []
         raise AssertionError(f"unexpected call: {args}")

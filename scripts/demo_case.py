@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from institutional_memory.config import COMPANY_INBOX_PATH
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-INBOX_PATH = PROJECT_ROOT / "inbox"
+DEMO_INBOX_PATH = COMPANY_INBOX_PATH
 
 RFP_DRAFT = """New RFP Draft
 
@@ -28,8 +30,8 @@ CASE_FILES = {
 
 
 def clear_inbox() -> None:
-    INBOX_PATH.mkdir(parents=True, exist_ok=True)
-    for path in INBOX_PATH.iterdir():
+    DEMO_INBOX_PATH.mkdir(parents=True, exist_ok=True)
+    for path in DEMO_INBOX_PATH.iterdir():
         if path.name == ".gitkeep":
             continue
         if path.is_file():
@@ -39,7 +41,7 @@ def clear_inbox() -> None:
 def write_case(name: str) -> Path:
     filename, body = CASE_FILES[name]
     clear_inbox()
-    target = INBOX_PATH / filename
+    target = DEMO_INBOX_PATH / filename
     target.write_text(body, encoding="utf-8")
     return target
 

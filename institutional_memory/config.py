@@ -22,8 +22,9 @@ TOP_K = int(os.getenv("TOP_K", "5"))
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "400"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
 
-INBOX_PATH = PROJECT_ROOT / "inbox"
-CORPUS_PATH = PROJECT_ROOT / "corpus"
+COMPANY_DOCS_PATH = PROJECT_ROOT / "company"
+COMPANY_INBOX_PATH = COMPANY_DOCS_PATH / "inbox"
+COMPANY_CORPUS_PATH = COMPANY_DOCS_PATH / "corpus"
 RUNTIME_PATH = PROJECT_ROOT / ".runtime"
 PROCESSED_REGISTRY = PROJECT_ROOT / "processed_drafts.json"
 INGESTED_REGISTRY = PROJECT_ROOT / "ingested_files.json"

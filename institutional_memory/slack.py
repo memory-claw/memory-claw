@@ -13,7 +13,9 @@ from slack_sdk.errors import SlackApiError
 from institutional_memory.config import SLACK_BOT_TOKEN, SLACK_CHANNEL, SLACK_WEBHOOK_URL
 from institutional_memory.paths import PathNotAllowedError, safe_runtime_path
 
-SOURCE_PATTERN = re.compile(r"\bcorpus/[A-Za-z0-9_.-]+\.txt\b")
+SOURCE_PATTERN = re.compile(
+    r"\bcompany/corpus/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:txt|md|pdf)\b"
+)
 
 
 def _read_message(message_file: str | None, message: str | None) -> str:

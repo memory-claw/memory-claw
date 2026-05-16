@@ -17,9 +17,9 @@ def test_readme_documents_asus_setup_and_rerun_flow():
 
     assert "PATH=$HOME/.local/bin:$PATH" in readme
     assert "~/run_openclaw.sh" in readme
-    assert "~/memory-claw/inbox/" in readme
-    assert "corpus/mock_data/" in readme
-    assert "inbox/000_nhs_northeast_liability_demo.md" in readme
+    assert "~/memory-claw/company/inbox/" in readme
+    assert "company/corpus/mock_data/" in readme
+    assert "company/inbox/000_nhs_northeast_liability_demo.md" in readme
     assert "./bin/imem reset-demo --clear-audit --clear-chroma" in readme
     assert "uv run python scripts/ingest_corpus.py --force" in readme
     assert "uv run python scripts/dgx_check.py --skip-backup-video" in readme
@@ -30,8 +30,9 @@ def test_readme_documents_company_data_intake():
     readme = Path("README.md").read_text(encoding="utf-8")
 
     assert "## Company Data" in readme
-    assert "corpus/company/" in readme
-    assert "inbox/company/" in readme
+    assert "company/" in readme
+    assert "company/corpus/" in readme
+    assert "company/inbox/" in readme
     assert "Do not put secrets" in readme
     assert "uv run python scripts/ingest_corpus.py --force" in readme
     assert "./bin/imem list-new-drafts" in readme
@@ -44,7 +45,7 @@ def test_readme_documents_current_slack_behavior():
     assert "Current Slack support is outbound only" in readme
     assert "does not read Slack channel history yet" in readme
     assert "should not post raw ingested Slack messages" in readme
-    assert "corpus/slack/" in readme
+    assert "company/corpus/slack/" in readme
     assert "skipped_no_relevant_memory" in readme
 
 

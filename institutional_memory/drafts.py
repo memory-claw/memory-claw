@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from institutional_memory.config import INBOX_PATH, PROJECT_ROOT
+from pathlib import Path
+
+from institutional_memory.config import COMPANY_INBOX_PATH, PROJECT_ROOT
 from institutional_memory.documents import load_document_text
 from institutional_memory.paths import safe_inbox_path
 from institutional_memory.state import load_processed_records
@@ -18,11 +20,15 @@ SLACK_METADATA = {
 
 
 def list_new_drafts() -> list[str]:
-    if not INBOX_PATH.exists():
-        return []
     processed = {record.get("path") for record in load_processed_records()}
+    return sorted(_new_drafts_under(COMPANY_INBOX_PATH, processed))
+
+
+def _new_drafts_under(root: Path, processed: set[str]) -> list[str]:
+    if not root.exists():
+        return []
     drafts: list[str] = []
-    for path in sorted(INBOX_PATH.rglob("*")):
+    for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
         if path.name == ".gitkeep" or path.suffix.lower() not in {".txt", ".md", ".pdf"}:

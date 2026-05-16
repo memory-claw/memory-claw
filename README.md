@@ -75,44 +75,45 @@ Then start OpenClaw with the existing ASUS script:
 OpenClaw reads drafts from the repo inbox:
 
 ```text
-~/memory-claw/inbox/
+~/memory-claw/company/inbox/
 ```
 
 Mock data is split by role:
 
 ```text
-corpus/mock_data/                         # old institutional memory to ingest
-inbox/000_nhs_northeast_liability_demo.md # active draft/thread to process
-inbox/010_cloudnest_vendor_onboarding_demo.md
-inbox/020_meridian_pricing_demo.md
-inbox/999_lunch_plans_noise_thread.md     # noise case, should not send Slack
+company/corpus/mock_data/                         # old institutional memory to ingest
+company/inbox/000_nhs_northeast_liability_demo.md # active draft/thread to process
+company/inbox/010_cloudnest_vendor_onboarding_demo.md
+company/inbox/020_meridian_pricing_demo.md
+company/inbox/999_lunch_plans_noise_thread.md     # noise case, should not send Slack
 docs/mock_data.md                         # dataset explanation, not ingested
 ```
 
 Add a draft on ASUS:
 
 ```bash
-cp ~/Downloads/mock_data.txt ~/memory-claw/inbox/
+cp ~/Downloads/mock_data.txt ~/memory-claw/company/inbox/
 ```
 
 Or copy from Mac to ASUS:
 
 ```bash
-scp -i ~/.ssh/asus_deploy ~/Downloads/mock_data.txt asus@100.68.221.47:/home/asus/memory-claw/inbox/
+scp -i ~/.ssh/asus_deploy ~/Downloads/mock_data.txt asus@100.68.221.47:/home/asus/memory-claw/company/inbox/
 ```
 
 Supported demo input types are `.txt`, `.md`, and `.pdf`.
 
 ## Company Data
 
-Use two buckets:
+Use one parent folder for company documents:
 
 ```text
-corpus/company/ # historical memory: postmortems, policies, contracts, Slack exports
-inbox/company/  # active drafts/threads that need a response
+company/
+|-- corpus/ # historical memory: postmortems, policies, contracts, Slack exports
+`-- inbox/  # active drafts/threads that need a response
 ```
 
-Put stable company knowledge in `corpus/company/`. Good examples:
+Put stable company knowledge in `company/corpus/`. Good examples:
 
 - postmortems and incident reports
 - won/lost bid writeups
@@ -121,13 +122,12 @@ Put stable company knowledge in `corpus/company/`. Good examples:
 - exported Slack threads that describe decisions
 - meeting notes with named owners and outcomes
 
-Put only the item you want OpenClaw to evaluate in `inbox/` or a top-level
-`inbox/company_*.md` file. The current inbox scanner lists top-level `.txt`,
-`.md`, and `.pdf` files; keep active demo drafts at the top level unless you add
-recursive inbox support.
+Put active company drafts or threads in `company/inbox/`. The inbox scanner only
+reads from `company/inbox/`, so all company-facing documents now live together
+under `company/`.
 
 Do not put secrets, credentials, private keys, raw customer PII, or production
-tokens in `corpus/` or `inbox/`. Redact first.
+tokens in `company/`, `company/corpus/`, or `company/inbox/`. Redact first.
 
 Recommended file format:
 
@@ -171,15 +171,15 @@ send-slack` post OpenClaw's final memory-backed answer into `SLACK_CHANNEL`.
 It does not read Slack channel history yet.
 
 The bot should not post raw ingested Slack messages. It posts only when an
-active inbox draft/thread matches useful institutional memory from `corpus/`.
+active inbox draft/thread matches useful institutional memory from `company/corpus/`.
 The message should summarize the relevant context and include source
-attribution, for example `corpus/2023_rfp_postmortem.txt`.
+attribution, for example `company/corpus/2023_rfp_postmortem.txt`.
 
 Planned Slack ingestion should use Slack as an input source:
 
-- resolved historical Slack threads belong in `corpus/slack/`, then run
+- resolved historical Slack threads belong in `company/corpus/slack/`, then run
   `uv run python scripts/ingest_corpus.py --force`
-- active Slack messages or threads that need help belong in `inbox/`, then ask
+- active Slack messages or threads that need help belong in `company/inbox/`, then ask
   OpenClaw to check the inbox
 - noise or casual threads should be marked `skipped_no_relevant_memory` and
   should not send Slack
@@ -193,7 +193,7 @@ Check the inbox now and process one new draft.
 ```
 
 The expected RFP path posts a Slack message with source attribution to
-`corpus/2023_rfp_postmortem.txt`. The expected silent path processes the draft
+`company/corpus/2023_rfp_postmortem.txt`. The expected silent path processes the draft
 with `skipped_no_relevant_memory` and sends no Slack message.
 
 Print the full live checklist any time:
