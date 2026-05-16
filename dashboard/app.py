@@ -329,7 +329,7 @@ def _slack_sent_count() -> int:
     return sum(1 for e in _parse_audit_objects() if e.get("type") == "slack_sent")
 
 
-def _infer_tag(rel_path: str) -> str:
+def _infer_document_type(rel_path: str) -> str:
     lower = rel_path.lower()
     if "policy" in lower:
         return "policy"
@@ -341,7 +341,9 @@ def _infer_tag(rel_path: str) -> str:
         return "slack"
     if "rfp" in lower or "bid" in lower:
         return "rfp"
-    return "doc"
+    if "draft" in lower:
+        return "draft"
+    return "other"
 
 
 def _chroma_chunks_for_source(rel: str) -> int | None:
@@ -481,6 +483,7 @@ def _inbox_item(rel_path: str, path: Path) -> dict[str, Any]:
         "title": title,
         "summary": summary,
         "status": status,
+        "type": _infer_document_type(rel_path),
         "matched_source": source,
         "score": score,
         "slack_channel": channel,
@@ -586,7 +589,8 @@ def api_corpus() -> list[dict[str, Any]]:
             except OSError:
                 size = 800
             chunks = max(1, size // 800)
-        items.append({"name": rel, "tag": _infer_tag(rel), "chunks": chunks})
+        doc_type = _infer_document_type(rel)
+        items.append({"name": rel, "tag": "doc" if doc_type == "other" else doc_type, "chunks": chunks})
     return items
 
 
@@ -712,29 +716,33 @@ def final_gate_page() -> str:
 
 @app.post("/api/run/ingest")
 def api_run_ingest() -> dict[str, Any]:
-    registry_before = dict(_load_ingested())
-    eligible = _list_corpus_paths()
-    skipped = 0
-    for path in eligible:
-        rel = str(path.resolve().relative_to(PROJECT_ROOT))
-        if registry_before.get(rel) == _fingerprint(path):
-            skipped += 1
+    try:
+        registry_before = dict(_load_ingested())
+        eligible = _list_corpus_paths()
+        skipped = 0
+        for path in eligible:
+            rel = str(path.resolve().relative_to(PROJECT_ROOT))
+            if registry_before.get(rel) == _fingerprint(path):
+                skipped += 1
 
-    result = ingest_folder(COMPANY_CORPUS_PATH, force=False)
-    registry_after = _load_ingested()
-    files_added = [
-        rel
-        for rel, fp in registry_after.items()
-        if registry_before.get(rel) != fp
-    ]
+        result = ingest_folder(COMPANY_CORPUS_PATH, force=False)
+        registry_after = _load_ingested()
+        files_added = [
+            rel
+            for rel, fp in registry_after.items()
+            if registry_before.get(rel) != fp
+        ]
 
-    return {
-        "added": len(files_added),
-        "skipped": skipped,
-        "files_added": files_added,
-        "chunks": result.get("chunks", 0),
-        "files": result.get("files", 0),
-    }
+        return {
+            "ok": True,
+            "added": len(files_added),
+            "skipped": skipped,
+            "files_added": files_added,
+            "chunks": result.get("chunks", 0),
+            "files": result.get("files", 0),
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 @app.get("/")
