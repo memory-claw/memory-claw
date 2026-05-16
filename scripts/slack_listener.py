@@ -65,6 +65,8 @@ def process(
         event = request.payload.get("event", {})
 
         if event.get("type") == "reaction_added":
+            if state.promotion_rate_limiter is None:
+                state.promotion_rate_limiter = PromotionRateLimiter()
             result = handle_reaction_event(
                 event=event,
                 client=web_client,

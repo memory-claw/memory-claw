@@ -115,3 +115,29 @@ def test_non_reaction_events_keep_message_then_listener_flow(monkeypatch):
     assert [call[0] for call in calls] == ["message", "listener"]
     assert calls[0][1:] == (event, web_client)
     assert calls[1][1:] == (event, web_client, state)
+
+
+def test_reaction_added_creates_rate_limiter_when_state_omits_one(monkeypatch):
+    captured = {}
+    event = {
+        "type": "reaction_added",
+        "reaction": "memo",
+        "user": "U123",
+        "item": {"type": "message", "channel": "C123", "ts": "1710000000.000000"},
+    }
+
+    def fake_handle_reaction_event(**kwargs):
+        captured.update(kwargs)
+        return {"status": "ignored", "reason": "channel_not_allowed"}
+
+    monkeypatch.setattr(slack_listener, "handle_reaction_event", fake_handle_reaction_event)
+
+    client = FakeSocketClient()
+    web_client = FakeWebClient()
+    state = ListenerState(bot_user_id="UBOT", allowed_channels={"C123"}, dedupe=DedupeSet())
+
+    slack_listener.process(client, _request(event), web_client, state)
+
+    assert len(client.responses) == 1
+    assert isinstance(captured["rate_limiter"], PromotionRateLimiter)
+    assert state.promotion_rate_limiter is captured["rate_limiter"]
