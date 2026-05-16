@@ -11,6 +11,7 @@ This design applies to the live Socket Mode listener path in `institutional_memo
 - Turn repeated "Found relevant context" snippet dumps into useful Slack answers.
 - Support per-thread advice behavior without adding persistent state.
 - Keep all answers grounded in retrieved ChromaDB hits and Slack thread text.
+- Compare the current situation to prior precedent when users ask "what happened last time?" or similar.
 - Preserve source transparency while respecting manual document restrictions.
 - Fall back to deterministic formatting if Ollama generation is unavailable.
 
@@ -55,6 +56,7 @@ The composer should classify the current turn into a small intent set:
 | --- | --- | --- |
 | `context` | "interesting", "need more information", "anything else?" | Summarize relevant memory. |
 | `advice` | "tips?", "next move?", "should we?", "what do you recommend?" | Include advice directly, even if thread mode is `offer`. |
+| `precedent` | "compare to precedent", "what happened last time?", "similar prior deal?", "any previous examples?" | Contrast the current situation with the closest prior memory. Do not include advice unless advice mode or wording requires it. |
 | `toggle` | "advice on", "advice off" | Update mode and confirm. |
 | `no_hit` | No search results | Existing mention no-hit behavior remains. |
 
@@ -75,6 +77,15 @@ Loop in engineering before signature and confirm SSO scope, white-label requirem
 Sources:
 - Vantara_Proposal_Draft_v0.1.md (76%)
 - Vantara_Enterprise_Deal_Demo_Thread.md (70%)
+```
+
+When the user asks for precedent, include a comparison block:
+
+```text
+Closest precedent:
+- Similarity: prior enterprise deal also involved custom SSO, white-label scope, and timeline pressure.
+- Difference: prior thread treated engineering review as a pre-signature blocker, not a post-signature follow-up.
+- Lesson: do not lock timeline or contract language before scope validation.
 ```
 
 If advice is not included but the thread appears decision-sensitive:
@@ -160,6 +171,7 @@ Responsibilities:
 
 - Detect advice/toggle intent from current text.
 - Resolve effective advice behavior from thread mode and intent.
+- Build precedent comparisons from current Slack text plus top allowed memory hits.
 - Build a compact, grounded prompt for Ollama using only policy-approved excerpts.
 - Validate and trim model output for Slack.
 - Provide deterministic fallback formatting.
@@ -200,6 +212,7 @@ Prompt rules:
 
 - Use only provided thread context and policy-approved memory excerpts.
 - Do not invent facts, dates, owners, or commitments.
+- For precedent requests, explicitly separate similarities, differences, and lessons from retrieved memory.
 - If advice is enabled, phrase advice as a suggested next move grounded in sources.
 - If advice is disabled, omit recommendations.
 - Keep under a configured Slack-safe character budget.
@@ -225,11 +238,13 @@ If model generation fails, times out, or returns empty text, use deterministic f
 Add focused unit tests:
 
 - `detect_response_intent()` recognizes advice questions.
+- `detect_response_intent()` recognizes precedent comparison requests.
 - `detect_thread_advice_command()` parses `advice on`, `advice off`, and `advice offer`.
 - Toggle command updates `ListenerState.thread_advice_modes` and does not call `search_memory`.
 - Advice mode `off` omits suggested next move.
 - Advice mode `on` includes suggested next move when composer fallback is used.
 - Advice mode `offer` adds offer line for decision-sensitive context.
+- Precedent responses include closest precedent, similarity, difference, and lesson sections.
 - Composer fallback includes filenames and scores.
 - `restricted` sources are removed before composer sees them.
 - Unmatched sources default to `restricted`.
@@ -243,6 +258,7 @@ Add focused unit tests:
 
 - In the Vantara thread, "interesting, i need more information on this" produces a grounded summary instead of repeated raw snippets.
 - "anything else, any tips on our next move?" produces a suggested next move grounded in retrieved Vantara sources.
+- "compare this to precedent" produces a concise comparison between the current situation and closest prior relevant memory.
 - `advice off` in a thread disables suggestions for that thread.
 - `advice on` in a thread enables suggestions for that thread.
 - Source citations remain visible in Slack.
