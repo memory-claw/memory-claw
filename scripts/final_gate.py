@@ -80,6 +80,13 @@ def audit_blockers(audit_text: str | None = None) -> list[str]:
     if not any(
         event.get("type") == "memory_searched"
         and event.get("driver") == "openclaw"
+        and event.get("source") == "corpus/2023_rfp_postmortem.txt"
+        for event in events
+    ):
+        blockers.append("missing RFP postmortem source proof")
+    if not any(
+        event.get("type") == "memory_searched"
+        and event.get("driver") == "openclaw"
         and event.get("count") == 0
         for event in events
     ):
