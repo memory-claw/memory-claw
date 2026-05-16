@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 
@@ -12,6 +13,8 @@ from slack_sdk.errors import SlackApiError
 from institutional_memory.config import SLACK_BOT_TOKEN, SLACK_CHANNEL, SLACK_WEBHOOK_URL
 from institutional_memory.paths import PathNotAllowedError, safe_runtime_path
 
+SOURCE_PATTERN = re.compile(r"\bcorpus/[A-Za-z0-9_.-]+\.txt\b")
+
 
 def _read_message(message_file: str | None, message: str | None) -> str:
     if message_file:
@@ -20,6 +23,10 @@ def _read_message(message_file: str | None, message: str | None) -> str:
     if message:
         return message
     raise ValueError("Provide --message-file or --message")
+
+
+def source_attributions(text: str) -> list[str]:
+    return sorted(set(SOURCE_PATTERN.findall(text)))
 
 
 def _webhook_post(text: str) -> dict:
@@ -57,10 +64,18 @@ def send_slack_message(
     if SLACK_BOT_TOKEN:
         try:
             WebClient(token=SLACK_BOT_TOKEN).chat_postMessage(channel=target, text=text)
-            return {"status": "sent", "channel": target}
+            return {
+                "status": "sent",
+                "channel": target,
+                "source_attributions": source_attributions(text),
+            }
         except SlackApiError as exc:
             fallback = _webhook_post(text)
             if fallback["status"] == "sent":
                 fallback["bot_token_error"] = exc.response.get("error", "slack_api_error")
+                fallback["source_attributions"] = source_attributions(text)
             return fallback
-    return _webhook_post(text)
+    fallback = _webhook_post(text)
+    if fallback["status"] == "sent":
+        fallback["source_attributions"] = source_attributions(text)
+    return fallback

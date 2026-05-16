@@ -18,6 +18,8 @@ GENERIC_QUERY_WORDS = {
     "search",
 }
 
+RFP_SOURCE = "corpus/2023_rfp_postmortem.txt"
+
 
 def run(command: list[str], timeout: int = 180) -> dict:
     try:
@@ -80,7 +82,7 @@ def audit_blockers(audit_text: str | None = None) -> list[str]:
     if not any(
         event.get("type") == "memory_searched"
         and event.get("driver") == "openclaw"
-        and event.get("source") == "corpus/2023_rfp_postmortem.txt"
+        and event.get("source") == RFP_SOURCE
         for event in events
     ):
         blockers.append("missing RFP postmortem source proof")
@@ -98,6 +100,14 @@ def audit_blockers(audit_text: str | None = None) -> list[str]:
         for event in events
     ):
         blockers.append("missing sent Slack proof")
+    if not any(
+        event.get("type") == "slack_sent"
+        and event.get("driver") == "openclaw"
+        and event.get("status") == "sent"
+        and RFP_SOURCE in event.get("source_attributions", [])
+        for event in events
+    ):
+        blockers.append("missing Slack source attribution proof")
     for event in events:
         if event.get("type") in required and event.get("driver") != "openclaw":
             blockers.append(f"non-openclaw proof for {event.get('type')}: {event.get('driver')}")

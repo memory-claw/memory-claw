@@ -63,7 +63,7 @@ def test_audit_requires_silent_zero_hit_search_proof(tmp_path, monkeypatch):
             "count": 1,
             "source": "corpus/2023_rfp_postmortem.txt",
         },
-        {"type": "slack_sent", "driver": "openclaw", "status": "sent"},
+        {"type": "slack_sent", "driver": "openclaw", "status": "sent", "source_attributions": ["corpus/2023_rfp_postmortem.txt"]},
         {"type": "processed", "driver": "openclaw", "status": "sent"},
         {"type": "processed", "driver": "openclaw", "status": "skipped_no_relevant_memory"},
     ]
@@ -81,7 +81,7 @@ def test_audit_requires_success_positive_hit_search_proof(tmp_path, monkeypatch)
         {"type": "draft_listed", "driver": "openclaw"},
         {"type": "draft_read", "driver": "openclaw"},
         {"type": "memory_searched", "driver": "openclaw", "query": "clinical trial dermatology", "count": 0},
-        {"type": "slack_sent", "driver": "openclaw", "status": "sent"},
+        {"type": "slack_sent", "driver": "openclaw", "status": "sent", "source_attributions": ["corpus/2023_rfp_postmortem.txt"]},
         {"type": "processed", "driver": "openclaw", "status": "sent"},
         {"type": "processed", "driver": "openclaw", "status": "skipped_no_relevant_memory"},
     ]
@@ -100,7 +100,7 @@ def test_audit_requires_rfp_postmortem_source_proof(tmp_path, monkeypatch):
         {"type": "draft_read", "driver": "openclaw"},
         {"type": "memory_searched", "driver": "openclaw", "query": "RFP liability indemnification", "count": 1, "source": "corpus/other.txt"},
         {"type": "memory_searched", "driver": "openclaw", "query": "clinical trial dermatology", "count": 0},
-        {"type": "slack_sent", "driver": "openclaw", "status": "sent"},
+        {"type": "slack_sent", "driver": "openclaw", "status": "sent", "source_attributions": ["corpus/2023_rfp_postmortem.txt"]},
         {"type": "processed", "driver": "openclaw", "status": "sent"},
         {"type": "processed", "driver": "openclaw", "status": "skipped_no_relevant_memory"},
     ]
@@ -131,6 +131,25 @@ def test_audit_requires_sent_slack_event(tmp_path, monkeypatch):
     assert "missing sent Slack proof" in blockers
 
 
+def test_audit_requires_slack_source_attribution(tmp_path, monkeypatch):
+    audit = tmp_path / "audit_log.jsonl"
+    events = [
+        {"type": "draft_listed", "driver": "openclaw"},
+        {"type": "draft_read", "driver": "openclaw"},
+        {"type": "memory_searched", "driver": "openclaw", "query": "RFP liability indemnification", "count": 1, "source": "corpus/2023_rfp_postmortem.txt"},
+        {"type": "memory_searched", "driver": "openclaw", "query": "clinical trial dermatology", "count": 0},
+        {"type": "slack_sent", "driver": "openclaw", "status": "sent"},
+        {"type": "processed", "driver": "openclaw", "status": "sent"},
+        {"type": "processed", "driver": "openclaw", "status": "skipped_no_relevant_memory"},
+    ]
+    audit.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
+    monkeypatch.setattr(final_gate, "AUDIT_LOG", audit)
+
+    blockers = final_gate.audit_blockers()
+
+    assert "missing Slack source attribution proof" in blockers
+
+
 def test_audit_reports_malformed_json_line(tmp_path, monkeypatch):
     audit = tmp_path / "audit_log.jsonl"
     audit.write_text("{not json}\n", encoding="utf-8")
@@ -158,7 +177,7 @@ def test_main_snapshots_audit_before_child_checks(tmp_path, monkeypatch, capsys)
         {"type": "draft_read", "driver": "openclaw"},
         {"type": "memory_searched", "driver": "openclaw", "query": "RFP liability indemnification", "count": 1, "source": "corpus/2023_rfp_postmortem.txt"},
         {"type": "memory_searched", "driver": "openclaw", "query": "clinical trial dermatology", "count": 0},
-        {"type": "slack_sent", "driver": "openclaw", "status": "sent"},
+        {"type": "slack_sent", "driver": "openclaw", "status": "sent", "source_attributions": ["corpus/2023_rfp_postmortem.txt"]},
         {"type": "processed", "driver": "openclaw", "status": "sent"},
         {"type": "processed", "driver": "openclaw", "status": "skipped_no_relevant_memory"},
     ]
