@@ -12,6 +12,18 @@ def test_readme_points_asus_operator_to_live_gate():
     assert "2026-05-15-institutional-memory-engine.md" in readme
 
 
+def test_readme_documents_asus_setup_and_rerun_flow():
+    readme = Path("README.md").read_text(encoding="utf-8")
+
+    assert "PATH=$HOME/.local/bin:$PATH" in readme
+    assert "~/run_openclaw.sh" in readme
+    assert "~/memory-claw/inbox/" in readme
+    assert "./bin/imem reset-demo --clear-audit --clear-chroma" in readme
+    assert "uv run python scripts/ingest_corpus.py --force" in readme
+    assert "uv run python scripts/dgx_check.py --skip-backup-video" in readme
+    assert "demo_artifacts/" in readme
+
+
 def test_plan_names_current_repo_path():
     plan = Path("2026-05-15-institutional-memory-engine.md").read_text(encoding="utf-8")
 

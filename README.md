@@ -14,19 +14,139 @@ demo machine. Final readiness still requires ASUS/DGX-only proof:
 - OpenClaw audit events tagged `driver=openclaw`
 - non-empty backup video under `demo_artifacts/`
 
-## ASUS Run
+## ASUS Setup
 
-After pulling this branch on ASUS:
+Run these commands on ASUS:
 
 ```bash
+cd ~/memory-claw
+git pull origin main
+export PATH=$HOME/.local/bin:$PATH
 uv sync
 cp -n .env.example .env
+```
+
+Edit `.env` and set real Slack values:
+
+```bash
+nano .env
+```
+
+Required:
+
+```text
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_CHANNEL=#institutional-memory
+SLACK_WEBHOOK_URL=
+```
+
+Pull/check models:
+
+```bash
+ollama pull qwen3-embedding:8b
+ollama pull nemotron-3-super:120b
+uv run python scripts/dgx_check.py --skip-backup-video
+```
+
+Expected:
+
+```json
+{"ok": true, "blockers": []}
+```
+
+Install OpenClaw workspace files:
+
+```bash
+mkdir -p ~/.openclaw/workspace/skills/institutional-memory
+cp SOUL.md ~/.openclaw/workspace/SOUL.md
+cp HEARTBEAT.md ~/.openclaw/workspace/HEARTBEAT.md
+cp skills/institutional-memory/SKILL.md ~/.openclaw/workspace/skills/institutional-memory/SKILL.md
+```
+
+Then start OpenClaw with the existing ASUS script:
+
+```bash
+~/run_openclaw.sh
+```
+
+## ASUS Inbox
+
+OpenClaw reads drafts from the repo inbox:
+
+```text
+~/memory-claw/inbox/
+```
+
+Add a draft on ASUS:
+
+```bash
+cp ~/Downloads/mock_data.txt ~/memory-claw/inbox/
+```
+
+Or copy from Mac to ASUS:
+
+```bash
+scp -i ~/.ssh/asus_deploy ~/Downloads/mock_data.txt asus@100.68.221.47:/home/asus/memory-claw/inbox/
+```
+
+Supported demo input types are `.txt`, `.md`, and `.pdf`.
+
+## ASUS Run
+
+From OpenClaw, ask:
+
+```text
+Check the inbox now and process one new draft.
+```
+
+The expected RFP path posts a Slack message with source attribution to
+`corpus/2023_rfp_postmortem.txt`. The expected silent path processes the draft
+with `skipped_no_relevant_memory` and sends no Slack message.
+
+Print the full live checklist any time:
+
+```bash
 uv run python scripts/live_handoff.py
 ```
 
-Set real `SLACK_BOT_TOKEN` and `SLACK_CHANNEL` in `.env`, then follow the
-printed sequence exactly. It covers model pulls, Slack secrets, OpenClaw setup,
-RFP success case, silent case, heartbeat proof, backup video, and final gate.
+## ASUS Rerun
+
+Reset demo state:
+
+```bash
+./bin/imem reset-demo --clear-audit --clear-chroma
+uv run python scripts/ingest_corpus.py --force
+uv run python scripts/cosine_sanity.py
+```
+
+Create the RFP demo draft:
+
+```bash
+uv run python scripts/demo_case.py rfp
+```
+
+Create the silent/no-Slack demo draft:
+
+```bash
+uv run python scripts/demo_case.py silent
+```
+
+For every fresh OpenClaw demo run:
+
+```bash
+./bin/imem reset-demo --clear-audit
+uv run python scripts/demo_case.py rfp
+~/run_openclaw.sh
+```
+
+Then ask OpenClaw to check the inbox.
+
+Record a backup `.mp4` or `.mov` under:
+
+```text
+demo_artifacts/
+```
 
 Final gate:
 
