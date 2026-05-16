@@ -98,8 +98,12 @@ def ingest_folder(folder: Path, force: bool = False) -> dict[str, int]:
     files = 0
     chunks = 0
 
-    for path in sorted(folder.iterdir()):
-        if path.name.startswith(".") or path.suffix.lower() not in {".txt", ".md", ".pdf"}:
+    for path in sorted(folder.rglob("*")):
+        if (
+            not path.is_file()
+            or any(part.startswith(".") for part in path.relative_to(folder).parts)
+            or path.suffix.lower() not in {".txt", ".md", ".pdf"}
+        ):
             continue
         rel = str(path.resolve().relative_to(PROJECT_ROOT))
         fingerprint = _fingerprint(path)

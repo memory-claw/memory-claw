@@ -78,6 +78,17 @@ OpenClaw reads drafts from the repo inbox:
 ~/memory-claw/inbox/
 ```
 
+Mock data is split by role:
+
+```text
+corpus/mock_data/                         # old institutional memory to ingest
+inbox/000_nhs_northeast_liability_demo.md # active draft/thread to process
+inbox/010_cloudnest_vendor_onboarding_demo.md
+inbox/020_meridian_pricing_demo.md
+inbox/999_lunch_plans_noise_thread.md     # noise case, should not send Slack
+docs/mock_data.md                         # dataset explanation, not ingested
+```
+
 Add a draft on ASUS:
 
 ```bash
