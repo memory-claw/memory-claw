@@ -86,3 +86,25 @@ def test_audit_reports_non_object_json_line(tmp_path, monkeypatch):
     blockers = final_gate.audit_blockers()
 
     assert "non-object audit line 1" in blockers
+
+
+def test_main_snapshots_audit_before_child_checks(tmp_path, monkeypatch, capsys):
+    audit = tmp_path / "audit_log.jsonl"
+    events = [
+        {"type": "draft_listed", "driver": "openclaw"},
+        {"type": "draft_read", "driver": "openclaw"},
+        {"type": "memory_searched", "driver": "openclaw", "query": "RFP liability indemnification"},
+        {"type": "slack_sent", "driver": "openclaw", "status": "sent"},
+        {"type": "processed", "driver": "openclaw", "status": "sent"},
+        {"type": "processed", "driver": "openclaw", "status": "skipped_no_relevant_memory"},
+    ]
+    audit.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
+    monkeypatch.setattr(final_gate, "AUDIT_LOG", audit)
+
+    def fake_run(command):
+        audit.unlink(missing_ok=True)
+        return {"command": command, "ok": True, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(final_gate, "run", fake_run)
+
+    assert final_gate.main() == 0

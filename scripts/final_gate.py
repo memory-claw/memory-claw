@@ -38,12 +38,14 @@ def run(command: list[str], timeout: int = 180) -> dict:
         return {"command": command, "ok": False, "error": f"timeout after {timeout}s"}
 
 
-def audit_blockers() -> list[str]:
-    if not AUDIT_LOG.exists():
+def audit_blockers(audit_text: str | None = None) -> list[str]:
+    if audit_text is None and not AUDIT_LOG.exists():
         return ["audit_log.jsonl missing"]
+    if audit_text is None:
+        audit_text = AUDIT_LOG.read_text(encoding="utf-8")
     events = []
     blockers = []
-    for line_number, line in enumerate(AUDIT_LOG.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(audit_text.splitlines(), start=1):
         if not line.strip():
             continue
         try:
@@ -91,6 +93,7 @@ def audit_blockers() -> list[str]:
 
 
 def main() -> int:
+    audit_text = AUDIT_LOG.read_text(encoding="utf-8") if AUDIT_LOG.exists() else None
     checks = [
         run(["uv", "run", "pytest", "-q"]),
         run(["uv", "run", "python", "scripts/cosine_sanity.py"]),
@@ -98,7 +101,7 @@ def main() -> int:
         run(["uv", "run", "python", "scripts/dgx_check.py"]),
     ]
     blockers = [check for check in checks if not check["ok"]]
-    blockers.extend({"command": ["audit"], "ok": False, "error": item} for item in audit_blockers())
+    blockers.extend({"command": ["audit"], "ok": False, "error": item} for item in audit_blockers(audit_text))
     print(json.dumps({"ok": not blockers, "blockers": blockers}, ensure_ascii=False, indent=2))
     return 0 if not blockers else 1
 
