@@ -220,6 +220,10 @@ def format_no_hits_reply() -> str:
     return "\U0001f50d I didn't find anything relevant in institutional memory."
 
 
+def format_no_shareable_hits_reply() -> str:
+    return "\U0001f50d I didn't find Slack-shareable context in institutional memory."
+
+
 # --- Task 5: Main handler ---
 
 FULL_SOURCE_COOLDOWN_SECONDS = 30.0
@@ -402,9 +406,36 @@ def handle_listener_event(
         log_event("listener_skip", channel=channel, reason="below_threshold", top_score=0)
         return {"status": "skipped", "reason": "below_threshold"}
 
-    policy = load_source_policy()
+    try:
+        policy = load_source_policy()
+    except Exception as exc:
+        log_event("listener_error", channel=channel, error=str(exc))
+        return {"status": "error", "error": str(exc)}
+
     visible_hits = apply_source_policy(hits, policy)
     if not visible_hits:
+        if is_mention:
+            try:
+                client.chat_postMessage(
+                    channel=channel,
+                    text=format_no_shareable_hits_reply(),
+                    thread_ts=thread_ts,
+                )
+                log_event(
+                    "listener_reply",
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    query=query,
+                    top_score=0,
+                    sources=[],
+                    triggered_by="mention",
+                    response_intent="context",
+                    advice_mode=state.thread_advice_modes.get(key, "offer"),
+                )
+                return {"status": "replied", "hits": 0, "triggered_by": "mention"}
+            except Exception as exc:
+                log_event("listener_error", channel=channel, error=str(exc))
+                return {"status": "error", "error": str(exc)}
         log_event(
             "listener_skip",
             channel=channel,
@@ -417,10 +448,8 @@ def handle_listener_event(
     intent = detect_response_intent(command_text)
     advice_mode = state.thread_advice_modes.get(key, "offer")
     include_footer = advice_mode == "offer" and key not in state.thread_footer_shown
-    thread_context = build_thread_context(event, bot_user_id=state.bot_user_id, client=client)
-    thread_text = f"{thread_context}\n\n{command_text}".strip() if thread_context else command_text
     reply_text = compose_slack_answer(
-        thread_text,
+        query,
         visible_hits,
         intent=intent,
         advice_mode=advice_mode,
@@ -451,4 +480,4 @@ def handle_listener_event(
         response_intent=intent,
         advice_mode=advice_mode,
     )
-    return {"status": "replied", "hits": len(hits), "triggered_by": triggered_by}
+    return {"status": "replied", "hits": len(visible_hits), "triggered_by": triggered_by}

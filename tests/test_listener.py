@@ -511,6 +511,46 @@ def test_show_source_after_normal_reply_uses_policy_filtered_refs_without_search
     second_search.assert_not_called()
 
 
+def test_policy_load_failure_returns_error_without_crashing():
+    state = _make_state()
+    client = MockWebClient()
+    event = {"type": "message", "channel": "C100", "ts": "1.0", "user": "U123", "text": "What was our Q3 strategy?"}
+    hits = [{"score": 0.85, "text": "Memory", "source": "company/corpus/q3.md"}]
+
+    with patch("institutional_memory.listener.search_memory", return_value=hits):
+        with patch("institutional_memory.listener.load_source_policy", side_effect=ValueError("bad policy")):
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "error"
+    assert "bad policy" in result["error"]
+    assert client.posted == []
+
+
+def test_mention_replies_when_policy_filters_all_hits():
+    state = _make_state(allowed_channels=set())
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C200",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "<@UBOT> what is our policy?",
+    }
+    hits = [{"score": 0.85, "text": "Restricted memory", "source": "company/corpus/restricted.md"}]
+    policy = FakePolicy({"company/corpus/restricted.md": "restricted"})
+
+    with patch("institutional_memory.listener.search_memory", return_value=hits):
+        with patch("institutional_memory.listener.load_source_policy", return_value=policy):
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert result["hits"] == 0
+    assert "slack-shareable" in client.posted[0]["text"].lower()
+    assert "Restricted memory" not in client.posted[0]["text"]
+
+
 def test_handle_unprompted_hit_replies_in_thread():
     state = _make_state()
     client = MockWebClient()
