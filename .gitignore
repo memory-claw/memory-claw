@@ -6,6 +6,8 @@ __pycache__/
 *.egg-info/
 dist/
 chroma_db/
+.chroma/
+dashboard/__pycache__/
 .runtime/*
 !.runtime/.gitkeep
 audit_log.jsonl

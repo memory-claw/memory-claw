@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>inbox — memory-claw</title>
+  <style>
+    :root {
+      --teal-dark: #0F6E56;
+      --teal: #1D9E75;
+      --teal-light: #E1F5EE;
+      --purple-dark: #534AB7;
+      --purple-light: #EEEDFE;
+      --bg: #f8f7f4;
+      --panel: #ffffff;
+      --border: #e8e6e0;
+      --text: #1a1a1a;
+      --secondary: #6b6b6b;
+      --muted: #9b9b9b;
+      --gray-bg: #eceae6;
+      --blue: #2563eb;
+      --font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 13px; line-height: 1.45; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 24px; }
+    .back { font-size: 12px; color: var(--teal); text-decoration: none; display: inline-block; margin-bottom: 20px; }
+    .back:hover { text-decoration: underline; }
+    h1 { font-size: 20px; margin-bottom: 6px; }
+    .page-sub { color: var(--muted); font-size: 12px; margin-bottom: 24px; }
+    .draft-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .draft-card:target { border-color: var(--teal); box-shadow: 0 0 0 2px var(--teal-light); }
+    .draft-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+    .draft-title { font-size: 16px; font-weight: 700; }
+    .draft-path { font-size: 10px; color: var(--muted); margin-top: 4px; }
+    .badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      text-transform: lowercase;
+      flex-shrink: 0;
+    }
+    .badge.new { background: var(--teal-light); color: var(--teal-dark); }
+    .badge.sent { background: var(--purple-light); color: var(--purple-dark); }
+    .badge.skipped { background: var(--gray-bg); color: var(--secondary); }
+    .badge.processing { background: #dbeafe; color: var(--blue); }
+    .draft-body {
+      font-size: 12px;
+      line-height: 1.55;
+      margin-bottom: 14px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .draft-body h1, .draft-body h2, .draft-body h3 { margin: 10px 0 6px; font-size: 14px; }
+    .draft-body p { margin: 6px 0; }
+    .decision { font-size: 12px; }
+    .decision h4 {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .kv { margin: 4px 0; color: var(--secondary); }
+    .kv strong { color: var(--muted); font-weight: 600; }
+    .slack-msg {
+      margin-top: 10px;
+      padding: 12px;
+      background: #f3f2ef;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      white-space: pre-wrap;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .meta-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .pill {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: var(--purple-light);
+      color: var(--purple-dark);
+    }
+    .empty { text-align: center; color: var(--muted); padding: 48px; }
+    .loading { color: var(--muted); padding: 24px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="/">← back to dashboard</a>
+    <h1>inbox</h1>
+    <p class="page-sub">All drafts in company/inbox/ with bot decisions from processed_drafts.json and audit_log.jsonl</p>
+    <div id="drafts"><p class="loading">Loading drafts…</p></div>
+  </div>
+  <script>
+    function esc(s) {
+      const d = document.createElement("div");
+      d.textContent = s == null ? "" : String(s);
+      return d.innerHTML;
+    }
+
+    function basename(p) {
+      if (!p) return "";
+      const parts = p.split("/");
+      return parts[parts.length - 1];
+    }
+
+    function renderDraft(d) {
+      const pills = [];
+      if (d.matched_source) pills.push(`<span class="pill">${esc(basename(d.matched_source))}</span>`);
+      if (d.score != null) pills.push(`<span class="pill">score ${esc(Number(d.score).toFixed(2))}</span>`);
+      if (d.slack_channel) pills.push(`<span class="pill">${esc(d.slack_channel)}</span>`);
+
+      let slackMeta = "";
+      if (d.slack_channel_id || d.slack_thread_ts || d.slack_permalink) {
+        const lines = [];
+        if (d.slack_channel_id) lines.push(`<div class="kv"><strong>channel:</strong> ${esc(d.slack_channel_id)}</div>`);
+        if (d.slack_thread_ts) lines.push(`<div class="kv"><strong>thread:</strong> ${esc(d.slack_thread_ts)}</div>`);
+        if (d.slack_permalink) lines.push(`<div class="kv"><strong>link:</strong> <a href="${esc(d.slack_permalink)}" target="_blank" rel="noopener">${esc(d.slack_permalink)}</a></div>`);
+        slackMeta = lines.join("");
+      }
+
+      const msg = d.slack_message
+        ? `<div class="slack-msg">${esc(d.slack_message)}</div>`
+        : d.status === "skipped"
+          ? `<div class="slack-msg">No message sent.${d.skip_reason ? " " + esc(d.skip_reason) : ""}</div>`
+          : "";
+
+      return `<article class="draft-card" id="${esc(d.path)}">
+        <div class="draft-head">
+          <div>
+            <div class="draft-title">${esc(d.title)}</div>
+            <div class="draft-path">${esc(d.path)}</div>
+          </div>
+          <span class="badge ${esc(d.status)}">${esc(d.status)}</span>
+        </div>
+        <div class="draft-body">${d.body_html || esc(d.body_markdown || "")}</div>
+        ${slackMeta ? `<div class="decision"><h4>slack source</h4>${slackMeta}</div>` : ""}
+        <div class="decision">
+          <h4>bot decision</h4>
+          <div class="kv">${esc(d.summary)}</div>
+          <div class="meta-pills">${pills.join("")}</div>
+          ${d.processed_at ? `<div class="kv" style="margin-top:8px"><strong>processed:</strong> ${esc(d.processed_at)}</div>` : ""}
+        </div>
+        ${msg ? `<div class="decision" style="margin-top:12px"><h4>slack message sent</h4>${msg}</div>` : ""}
+      </article>`;
+    }
+
+    async function load() {
+      const el = document.getElementById("drafts");
+      try {
+        const items = await fetch("/api/inbox/full").then((r) => r.json());
+        if (!items.length) {
+          el.innerHTML = '<p class="empty">No inbox files in company/inbox/</p>';
+          return;
+        }
+        el.innerHTML = items.map(renderDraft).join("");
+        if (location.hash) {
+          const target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+          if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      } catch (e) {
+        el.innerHTML = `<p class="empty">Failed to load: ${esc(String(e))}</p>`;
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>
