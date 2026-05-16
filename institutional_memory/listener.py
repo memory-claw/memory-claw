@@ -21,6 +21,7 @@ from institutional_memory.response_composer import (
     should_accept_advice_offer,
 )
 from institutional_memory.search import search_memory
+from institutional_memory.slack_promotion import PromotionRateLimiter
 from institutional_memory.source_policy import (
     apply_source_policy,
     load_source_policy,
@@ -241,6 +242,8 @@ class ListenerState:
     thread_advice_offer_pending: set[tuple[str, str]] = field(default_factory=set)
     thread_source_refs: dict[tuple[str, str], list[dict[str, Any]]] = field(default_factory=dict)
     thread_full_source_cooldowns: dict[tuple[str, str, int], float] = field(default_factory=dict)
+    promotion_allowed_channels: set[str] = field(default_factory=set)
+    promotion_rate_limiter: PromotionRateLimiter | None = None
 
 
 def _is_mention(event: dict[str, Any], bot_user_id: str) -> bool:

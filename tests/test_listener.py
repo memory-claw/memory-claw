@@ -16,6 +16,7 @@ from institutional_memory.listener import (
     should_skip,
     strip_mention,
 )
+from institutional_memory.slack_promotion import PromotionRateLimiter
 
 
 def test_should_skip_bot_id():
@@ -359,6 +360,20 @@ def _make_state(allowed_channels=None, bot_user_id="UBOT"):
         dedupe=DedupeSet(max_size=100, ttl_seconds=60),
         active_threads=set(),
     )
+
+
+def test_listener_state_carries_promotion_state():
+    rate_limiter = PromotionRateLimiter()
+    state = ListenerState(
+        bot_user_id="UBOT",
+        allowed_channels={"C100"},
+        dedupe=DedupeSet(max_size=100, ttl_seconds=60),
+        promotion_allowed_channels={"C200"},
+        promotion_rate_limiter=rate_limiter,
+    )
+
+    assert state.promotion_allowed_channels == {"C200"}
+    assert state.promotion_rate_limiter is rate_limiter
 
 
 class MockWebClient:
