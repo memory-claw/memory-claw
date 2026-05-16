@@ -13,6 +13,7 @@ from institutional_memory.audit import log_event
 from institutional_memory.config import (
     AUDIT_LOG,
     CHROMA_PATH,
+    COMPANY_INBOX_PATH,
     PROJECT_ROOT,
     RUNTIME_PATH,
 )
@@ -100,11 +101,17 @@ def cmd_reset_demo(args: argparse.Namespace) -> int:
     if args.clear_chroma:
         shutil.rmtree(CHROMA_PATH, ignore_errors=True)
         (PROJECT_ROOT / "ingested_files.json").unlink(missing_ok=True)
+    if args.clear_slack_inbox:
+        slack_inbox = COMPANY_INBOX_PATH / "slack"
+        if slack_inbox.exists():
+            for child in slack_inbox.rglob("*"):
+                if child.is_file() and child.name != ".gitkeep":
+                    child.unlink(missing_ok=True)
     if args.clear_audit:
         AUDIT_LOG.unlink(missing_ok=True)
     else:
-        log_event("demo_reset", clear_chroma=args.clear_chroma)
-    emit({"status": "reset", "clear_audit": args.clear_audit, "clear_chroma": args.clear_chroma})
+        log_event("demo_reset", clear_chroma=args.clear_chroma, clear_slack_inbox=args.clear_slack_inbox)
+    emit({"status": "reset", "clear_audit": args.clear_audit, "clear_chroma": args.clear_chroma, "clear_slack_inbox": args.clear_slack_inbox})
     return 0
 
 
@@ -139,6 +146,36 @@ def cmd_send_slack(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sync_slack(args: argparse.Namespace) -> int:
+    from institutional_memory.slack_ingest import sync_slack_history
+
+    try:
+        result = sync_slack_history(
+            mode=args.mode,
+            channel=args.channel,
+            limit=args.limit,
+            force=args.force,
+            sleep_seconds=args.sleep_seconds,
+        )
+    except Exception as exc:
+        return _emit_error(f"sync slack failed: {exc}", "slack_sync_failed", channel=args.channel, mode=args.mode)
+    log_event("slack_synced", **result)
+    emit(result)
+    return 0
+
+
+def cmd_promote_slack_thread(args: argparse.Namespace) -> int:
+    from institutional_memory.slack_ingest import promote_slack_thread
+
+    try:
+        result = promote_slack_thread(args.path, force=args.force)
+    except Exception as exc:
+        return _emit_error(f"promote slack thread failed: {exc}", "slack_promote_failed", path=args.path)
+    log_event("slack_thread_promoted", **result)
+    emit(result)
+    return 0
+
+
 def cmd_nemoclaw_probe(args: argparse.Namespace) -> int:
     from institutional_memory.nemoclaw import run_probe
 
@@ -149,7 +186,8 @@ def cmd_nemoclaw_probe(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imem", description="Institutional Memory Engine")
     visible_commands = (
-        "hello,list-new-drafts,read-draft,mark-processed,reset-demo,search-memory,send-slack"
+        "hello,list-new-drafts,read-draft,mark-processed,reset-demo,search-memory,"
+        "send-slack,sync-slack,promote-slack-thread"
     )
     sub = parser.add_subparsers(
         dest="command",
@@ -179,6 +217,7 @@ def build_parser() -> argparse.ArgumentParser:
     reset = sub.add_parser("reset-demo", help="Reset runtime demo state")
     reset.add_argument("--clear-audit", action="store_true")
     reset.add_argument("--clear-chroma", action="store_true")
+    reset.add_argument("--clear-slack-inbox", action="store_true")
     reset.set_defaults(func=cmd_reset_demo)
 
     search = sub.add_parser("search-memory", help="Search persistent institutional memory")
@@ -194,6 +233,19 @@ def build_parser() -> argparse.ArgumentParser:
     slack.add_argument("--channel")
     slack.add_argument("--thread-ts")
     slack.set_defaults(func=cmd_send_slack)
+
+    sync = sub.add_parser("sync-slack", help="Import Slack history into inbox or corpus")
+    sync.add_argument("--mode", choices=["inbox", "corpus"], required=True)
+    sync.add_argument("--channel", required=True)
+    sync.add_argument("--limit", type=int, default=20)
+    sync.add_argument("--sleep-seconds", type=float, default=1.2)
+    sync.add_argument("--force", action="store_true")
+    sync.set_defaults(func=cmd_sync_slack)
+
+    promote = sub.add_parser("promote-slack-thread", help="Copy a Slack inbox artifact into corpus")
+    promote.add_argument("--path", required=True)
+    promote.add_argument("--force", action="store_true")
+    promote.set_defaults(func=cmd_promote_slack_thread)
 
     probe = sub.add_parser("nemoclaw-probe", help=argparse.SUPPRESS)
     probe.add_argument("probe", choices=["denied-read", "denied-network"])
