@@ -13,3 +13,4 @@ def test_handoff_names_final_gate_proof_artifacts():
     assert "source_attributions" in text
     assert "non-empty" in text
     assert "no slack_sent" in text
+    assert "ordered" in text

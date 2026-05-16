@@ -49,6 +49,13 @@ def _find_index(events: list[dict], start: int, **fields: str) -> int | None:
     return None
 
 
+def _find_matching_index(events: list[dict], start: int, predicate) -> int | None:
+    for index, event in enumerate(events[start:], start=start):
+        if predicate(event):
+            return index
+    return None
+
+
 def _has_sent_slack(events: list[dict], start: int, end: int) -> bool:
     return any(
         event.get("type") == "slack_sent"
@@ -156,6 +163,47 @@ def audit_blockers(audit_text: str | None = None) -> list[str]:
         for event in events
     ):
         blockers.append("missing Slack source attribution proof")
+    rfp_read_index = _find_index(
+        events,
+        0,
+        type="draft_read",
+        driver="openclaw",
+        path=RFP_DRAFT,
+    )
+    rfp_success_ordered = False
+    if rfp_read_index is not None:
+        rfp_search_index = _find_matching_index(
+            events,
+            rfp_read_index + 1,
+            lambda event: event.get("type") == "memory_searched"
+            and event.get("driver") == "openclaw"
+            and isinstance(event.get("count"), int)
+            and event.get("count") > 0
+            and event.get("source") == RFP_SOURCE,
+        )
+        if rfp_search_index is not None:
+            rfp_slack_index = _find_matching_index(
+                events,
+                rfp_search_index + 1,
+                lambda event: event.get("type") == "slack_sent"
+                and event.get("driver") == "openclaw"
+                and event.get("status") == "sent"
+                and RFP_SOURCE in event.get("source_attributions", []),
+            )
+            if rfp_slack_index is not None:
+                rfp_success_ordered = (
+                    _find_index(
+                        events,
+                        rfp_slack_index + 1,
+                        type="processed",
+                        driver="openclaw",
+                        path=RFP_DRAFT,
+                        status="sent",
+                    )
+                    is not None
+                )
+    if not rfp_success_ordered:
+        blockers.append("missing ordered RFP success proof")
     silent_read_index = _find_index(
         events,
         0,

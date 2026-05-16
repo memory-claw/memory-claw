@@ -131,6 +131,26 @@ def test_audit_rejects_slack_sent_during_silent_window(tmp_path, monkeypatch):
     assert "silent case posted Slack" in blockers
 
 
+def test_audit_requires_ordered_rfp_success_sequence(tmp_path, monkeypatch):
+    audit = tmp_path / "audit_log.jsonl"
+    events = [
+        {"type": "draft_listed", "driver": "openclaw"},
+        {"type": "draft_read", "driver": "openclaw", "path": "inbox/new_rfp_draft.txt"},
+        {"type": "slack_sent", "driver": "openclaw", "status": "sent", "source_attributions": ["corpus/2023_rfp_postmortem.txt"]},
+        {"type": "memory_searched", "driver": "openclaw", "query": "RFP liability indemnification", "count": 1, "source": "corpus/2023_rfp_postmortem.txt"},
+        {"type": "processed", "driver": "openclaw", "path": "inbox/new_rfp_draft.txt", "status": "sent"},
+        {"type": "draft_read", "driver": "openclaw", "path": "inbox/000_silent_clinical_trial_protocol.txt"},
+        {"type": "memory_searched", "driver": "openclaw", "query": "clinical trial dermatology", "count": 0},
+        {"type": "processed", "driver": "openclaw", "path": "inbox/000_silent_clinical_trial_protocol.txt", "status": "skipped_no_relevant_memory"},
+    ]
+    audit.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
+    monkeypatch.setattr(final_gate, "AUDIT_LOG", audit)
+
+    blockers = final_gate.audit_blockers()
+
+    assert "missing ordered RFP success proof" in blockers
+
+
 def test_audit_requires_silent_zero_hit_search_proof(tmp_path, monkeypatch):
     audit = tmp_path / "audit_log.jsonl"
     events = [
