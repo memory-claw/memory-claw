@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+IMEM_PATH = PROJECT_ROOT / "bin" / "imem"
 
 STEPS = [
     "1. uv sync",
@@ -11,7 +16,7 @@ STEPS = [
     "7. uv run python scripts/ingest_corpus.py --force",
     "8. uv run python scripts/cosine_sanity.py",
     "9. Configure OpenClaw native Ollama provider with model ollama/nemotron-3-super:120b and baseUrl http://127.0.0.1:11434",
-    "10. Allowlist only the absolute bin/imem wrapper path",
+    f"10. Allowlist only this absolute wrapper path: {IMEM_PATH}",
     "11. Ask OpenClaw: Check the inbox now and process one new draft.",
     "12. Verify Slack receives the RFP message and audit_log.jsonl has ordered RFP proof: draft_read path=inbox/new_rfp_draft.txt, memory_searched count > 0 source=corpus/2023_rfp_postmortem.txt, slack_sent status=sent source_attributions includes corpus/2023_rfp_postmortem.txt, processed path=inbox/new_rfp_draft.txt status=sent.",
     "13. ./bin/imem reset-demo",
