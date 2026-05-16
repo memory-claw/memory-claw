@@ -11,7 +11,7 @@ The promoted corpus entry should not be a raw transcript by itself. It should be
 - Let humans curate Slack threads into institutional memory with `:memo:` or `:brain:`.
 - Store a concise, searchable memory card in `company/corpus/slack/promoted/`.
 - Store the full Slack thread as non-indexed evidence in `company/evidence/slack/`.
-- Capture a resolution only when the thread explicitly contains one.
+- Capture an outcome only when the thread explicitly contains one.
 - Keep manual corpus ingest behavior explicit unless a separate ingest automation is added.
 - Prevent bot replies alone from promoting noisy or sensitive threads.
 - Keep promotion disabled unless an explicit promotion channel allowlist is configured.
@@ -30,6 +30,8 @@ The promoted corpus entry should not be a raw transcript by itself. It should be
 ### Version 1 Trigger
 
 Only `reaction_added` from a human user in a configured promotion channel can trigger auto-promotion.
+
+The Slack app must subscribe to the `reaction_added` bot event under Event Subscriptions. Without this subscription, Socket Mode will not deliver reaction events to the listener.
 
 Allowed reactions:
 
@@ -138,11 +140,9 @@ Permalink: https://example.slack.com/archives/C123/p1710000000000000
 
 Short factual summary of the thread.
 
-## Resolution
+## Outcome
 
-The resolution stated in the thread.
-
-If none is stated: No resolution captured.
+Only include this section when the thread explicitly states an outcome, decision, fix, or resolution.
 
 ## Reusable Takeaway
 
@@ -178,7 +178,7 @@ The JSON evidence file is stored outside `company/corpus/` so future ingest suff
 
 The card title is deterministic:
 
-- Pick the first substantive human message in the parent thread.
+- Pick the first substantive non-Memory-Claw message in the parent thread.
 - HTML-unescape it.
 - Strip Slack mention tokens.
 - Collapse whitespace.
@@ -192,14 +192,14 @@ The LLM must not generate the title in v1.
 The memory card composer must be conservative:
 
 - Use only Slack thread text and related source filenames.
-- Do not invent resolution if the thread does not contain one.
-- Always include `Resolution`; write `No resolution captured` unless the thread explicitly states a decision, fix, answer, or outcome.
+- Do not invent an outcome if the thread does not contain one.
+- Omit `Outcome` unless the thread explicitly states a decision, fix, answer, or resolution.
 - Omit `Reusable Takeaway` unless the thread explicitly states a reusable lesson, rule, or decision pattern.
-- Use a bounded composition window for the card: first substantive message, last 10 human messages, and at most 4,000 characters total.
+- Use a bounded composition window for the card: first substantive non-Memory-Claw message, last 10 non-Memory-Claw messages, and at most 4,000 characters total.
 - Store the full unbounded thread in the evidence JSON.
-- Keep the card short enough to be a useful retrieval target, with a target maximum of 2,000 characters.
+- Keep the card short enough to be a useful retrieval target, with section-level truncation that never cuts the markdown document mid-section.
 
-An LLM may draft the card body, but deterministic post-processing must enforce required fields and safe fallbacks. If generation fails, write a deterministic card with the title, a compact message preview, and `No resolution captured`.
+An LLM may draft the card body, but deterministic post-processing must enforce required fields and safe fallbacks. If generation fails, write a deterministic card with the title and a compact message preview.
 
 ## Rate Limiting
 
@@ -237,6 +237,7 @@ Future automation can add a systemd timer, cron, dashboard-triggered ingest, or 
 ## Security And Safety
 
 - Ignore reactions from bots.
+- Include third-party bot or integration messages in the promoted card when a human reaction curated the thread. Exclude only Memory Claw's own bot messages from the card body.
 - Process only configured emoji names.
 - Process only channels explicitly listed in `PROMOTION_ALLOWED_CHANNELS`.
 - Default `PROMOTION_ALLOWED_CHANNELS` to empty, meaning promotion is disabled.
@@ -261,6 +262,7 @@ Responsibilities:
 - Build deterministic card titles.
 - Compose memory card markdown.
 - Write card and evidence files.
+- Scan only a bounded tail of the audit log for related sources; this is best-effort tech debt, not a hard dependency.
 - Return JSON-safe status dictionaries.
 
 Modified module:
@@ -320,12 +322,15 @@ Add focused unit tests:
 - Evidence JSON is written under `company/evidence/slack/`, not `company/corpus/`.
 - Existing promotion returns `exists` without rewriting.
 - Memory card contains required metadata fields.
-- Missing resolution writes `No resolution captured`.
+- Missing outcome omits the `Outcome` section.
 - Explicit reusable takeaway appears only when thread text supports it.
 - Related sources from a matching `listener_reply` audit event appear in the card.
+- Related source lookup scans a bounded audit tail.
 - Missing or malformed audit data does not block promotion.
 - Long threads store full evidence but compose the card from a bounded window.
-- Deterministic title uses the first substantive human message.
+- Long cards are truncated by section, not by blindly slicing the final markdown.
+- Deterministic title uses the first substantive non-Memory-Claw message.
+- Third-party bot/integration messages can appear in the card body when the promotion was triggered by a human reaction.
 - Slack API failure returns JSON-safe error status.
 - Listener routes `reaction_added` events without invoking message search/reply logic.
 
@@ -333,11 +338,12 @@ Add focused unit tests:
 
 - Adding `:memo:` to a Slack thread creates a memory card under `company/corpus/slack/promoted/`.
 - Adding `:brain:` behaves the same, with the reaction recorded in metadata.
+- Slack app setup docs call out the required `reaction_added` event subscription.
 - Promotion only runs in channels explicitly listed in `PROMOTION_ALLOWED_CHANNELS`.
 - The full thread is preserved as JSON evidence under `company/evidence/slack/`.
-- The card states a resolution only when the thread text supports one.
+- The card includes an outcome only when the thread text supports one.
 - The card omits reusable takeaway unless thread text supports one.
-- The card title is deterministic from the first substantive human message.
+- The card title is deterministic from the first substantive non-Memory-Claw message.
 - Repeating the reaction does not create duplicate corpus entries.
 - Rapid reaction bursts are rate-limited.
 - The promoted card becomes searchable after `uv run python scripts/ingest_corpus.py --force`.

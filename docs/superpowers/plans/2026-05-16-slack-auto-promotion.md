@@ -33,7 +33,7 @@
 - Create `tests/test_slack_listener_process.py`
   - Verifies `scripts/slack_listener.process()` routes `reaction_added` without invoking message ingest/search.
 - Modify `README.md`
-  - Documents the reaction workflow and explicit reingest requirement.
+  - Documents the reaction workflow, Slack `reaction_added` event subscription, and explicit reingest requirement.
 
 ---
 
@@ -180,7 +180,7 @@ class FakePromotionClient:
     def __init__(self, messages=None, permalink=None):
         self.messages = messages or [
             {"ts": "1710000000.000000", "user": "U123", "text": "Need precedent for vendor liability clause"},
-            {"ts": "1710000001.000000", "user": "U456", "text": "Resolution: use the standard cap from the vendor terms playbook"},
+            {"ts": "1710000001.000000", "user": "U456", "text": "We decided to use the standard cap from the vendor terms playbook"},
         ]
         self.permalink = permalink or "https://example.slack.com/archives/C123/p1710000000000000"
         self.replies_calls = []
@@ -303,7 +303,7 @@ def test_approved_reaction_writes_memory_card_and_evidence(tmp_path, monkeypatch
     text = card.read_text(encoding="utf-8")
     assert "# Slack Memory: Need precedent for vendor liability clause" in text
     assert "Reaction: :memo:" in text
-    assert "## Resolution" in text
+    assert "## Outcome" in text
     assert "use the standard cap" in text
     assert "company/evidence/slack/C123_1710000000.000000.json" in text
     payload = json.loads(evidence.read_text(encoding="utf-8"))
@@ -332,7 +332,7 @@ def test_reaction_on_reply_promotes_parent_thread(tmp_path, monkeypatch):
     company_corpus, _ = _patch_promotion_paths(monkeypatch, tmp_path)
     client = FakePromotionClient(messages=[
         {"ts": "1710000000.000000", "user": "U123", "text": "Need precedent for vendor liability clause"},
-        {"ts": "1710000005.000000", "thread_ts": "1710000000.000000", "user": "U456", "text": "Resolution: use standard cap"},
+        {"ts": "1710000005.000000", "thread_ts": "1710000000.000000", "user": "U456", "text": "We decided to use standard cap"},
     ])
 
     result = slack_promotion.handle_reaction_event(
@@ -366,7 +366,7 @@ def test_existing_card_returns_exists_without_rewrite(tmp_path, monkeypatch):
     assert card.read_text(encoding="utf-8") == "original"
 
 
-def test_missing_resolution_writes_no_resolution_captured(tmp_path, monkeypatch):
+def test_missing_outcome_omits_outcome_section(tmp_path, monkeypatch):
     company_corpus, _ = _patch_promotion_paths(monkeypatch, tmp_path)
     client = FakePromotionClient(messages=[
         {"ts": "1710000000.000000", "user": "U123", "text": "Need precedent for vendor liability clause"},
@@ -384,7 +384,7 @@ def test_missing_resolution_writes_no_resolution_captured(tmp_path, monkeypatch)
     assert result["status"] == "promoted"
     card = company_corpus / "slack" / "promoted" / "C123_1710000000.000000.md"
     text = card.read_text(encoding="utf-8")
-    assert "No resolution captured" in text
+    assert "## Outcome" not in text
     assert "## Reusable Takeaway" not in text
 
 
@@ -430,8 +430,35 @@ def test_long_threads_use_bounded_card_window_but_full_evidence(tmp_path, monkey
     assert result["status"] == "promoted"
     card = company_corpus / "slack" / "promoted" / "C123_1710000000.000000.md"
     evidence = company_evidence / "slack" / "C123_1710000000.000000.json"
-    assert len(card.read_text(encoding="utf-8")) <= 2500
+    text = card.read_text(encoding="utf-8")
+    assert len(text) <= 2600
+    assert "## Evidence" in text
+    assert "Raw Slack thread snapshot:" in text
     assert len(json.loads(evidence.read_text(encoding="utf-8"))["messages"]) == 21
+
+
+def test_third_party_bot_messages_are_kept_in_card(tmp_path, monkeypatch):
+    company_corpus, _ = _patch_promotion_paths(monkeypatch, tmp_path)
+    client = FakePromotionClient(messages=[
+        {"ts": "1710000000.000000", "bot_id": "BPAGER", "username": "PagerDuty", "text": "PagerDuty alert: checkout API latency high"},
+        {"ts": "1710000001.000000", "user": "U123", "text": "We decided to roll back the checkout deploy"},
+        {"ts": "1710000002.000000", "user": "UBOT", "text": "Memory Claw reply should not be indexed"},
+    ])
+
+    result = slack_promotion.handle_reaction_event(
+        _reaction_event(),
+        client=client,
+        allowed_channels={"C123"},
+        rate_limiter=slack_promotion.PromotionRateLimiter(),
+        bot_user_id="UBOT",
+    )
+
+    assert result["status"] == "promoted"
+    card = company_corpus / "slack" / "promoted" / "C123_1710000000.000000.md"
+    text = card.read_text(encoding="utf-8")
+    assert "PagerDuty alert" in text
+    assert "roll back the checkout deploy" in text
+    assert "Memory Claw reply should not be indexed" not in text
 ```
 
 - [ ] **Step 2: Run tests to verify module missing failure**
@@ -478,8 +505,9 @@ from institutional_memory.paths import safe_corpus_path, safe_evidence_path
 APPROVED_REACTIONS = {"memo", "brain"}
 INGEST_REMINDER = "run uv run python scripts/ingest_corpus.py --force to make promoted Slack memory searchable"
 MAX_TITLE_CHARS = 80
-MAX_CARD_CHARS = 2000
+MAX_SECTION_CHARS = 1200
 MAX_CONTEXT_CHARS = 4000
+AUDIT_LOOKBACK_LINES = 1000
 
 
 class PromotionRateLimiter:
@@ -522,59 +550,85 @@ def _message_text(message: dict[str, Any]) -> str:
     return _clean_text(str(message.get("text", "")))
 
 
-def _human_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _card_messages(messages: list[dict[str, Any]], bot_user_id: str) -> list[dict[str, Any]]:
     return [
         message
         for message in messages
-        if not message.get("bot_id") and message.get("user") and _message_text(message)
+        if message.get("user") != bot_user_id and _message_text(message)
     ]
 
 
-def title_from_messages(channel: str, thread_ts: str, messages: list[dict[str, Any]]) -> str:
-    for message in _human_messages(messages):
+def _message_author(message: dict[str, Any]) -> str:
+    return str(message.get("user") or message.get("username") or message.get("bot_id") or "unknown")
+
+
+def title_from_messages(channel: str, thread_ts: str, messages: list[dict[str, Any]], bot_user_id: str) -> str:
+    for message in _card_messages(messages, bot_user_id):
         text = _message_text(message)
         if text:
             return text[:MAX_TITLE_CHARS].rstrip()
     return f"Slack thread {channel} {thread_ts}"
 
 
-def _first_marker_text(messages: list[dict[str, Any]], markers: list[str]) -> str | None:
-    for message in reversed(_human_messages(messages)):
+OUTCOME_PATTERNS = [
+    r"\bdecision\s*:\s*(?P<text>.+)$",
+    r"\bresolution\s*:\s*(?P<text>.+)$",
+    r"\bresolved\s*:\s*(?P<text>.+)$",
+    r"\bfixed\s*:\s*(?P<text>.+)$",
+    r"\bwe\s+(?:decided|agreed)\s+to\s+(?P<text>.+)$",
+]
+
+
+def _explicit_outcome(messages: list[dict[str, Any]], bot_user_id: str) -> str | None:
+    for message in reversed(_card_messages(messages, bot_user_id)):
         text = _message_text(message)
-        lower = text.lower()
-        for marker in markers:
-            if lower.startswith(marker):
-                return text.split(":", 1)[1].strip() if ":" in text else text
+        for pattern in OUTCOME_PATTERNS:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                return match.group("text").strip()
     return None
 
 
-def _resolution(messages: list[dict[str, Any]]) -> str:
-    value = _first_marker_text(
-        messages,
-        ["resolution:", "resolved:", "decision:", "decided:", "fixed:"],
-    )
-    return value or "No resolution captured"
+def _takeaway(messages: list[dict[str, Any]], bot_user_id: str) -> str | None:
+    for message in reversed(_card_messages(messages, bot_user_id)):
+        text = _message_text(message)
+        match = re.search(r"\b(?:takeaway|lesson)\s*:\s*(?P<text>.+)$", text, flags=re.IGNORECASE)
+        if match:
+            return match.group("text").strip()
+    return None
 
 
-def _takeaway(messages: list[dict[str, Any]]) -> str | None:
-    return _first_marker_text(messages, ["takeaway:", "lesson:"])
+def _limit_section(text: str, max_chars: int = MAX_SECTION_CHARS) -> str:
+    if len(text) <= max_chars:
+        return text
+    kept: list[str] = []
+    total = 0
+    for line in text.splitlines():
+        next_total = total + len(line) + 1
+        if next_total > max_chars:
+            break
+        kept.append(line)
+        total = next_total
+    if not kept:
+        return text[:max_chars].rsplit(" ", 1)[0].rstrip() + "\n[truncated]"
+    return "\n".join(kept).rstrip() + "\n[truncated]"
 
 
-def _bounded_context(messages: list[dict[str, Any]]) -> str:
-    humans = _human_messages(messages)
-    if not humans:
+def _bounded_context(messages: list[dict[str, Any]], bot_user_id: str) -> str:
+    card_messages = _card_messages(messages, bot_user_id)
+    if not card_messages:
         return ""
 
     selected: list[dict[str, Any]] = []
-    selected.append(humans[0])
-    for message in humans[-10:]:
+    selected.append(card_messages[0])
+    for message in card_messages[-10:]:
         if message not in selected:
             selected.append(message)
 
     lines: list[str] = []
     total = 0
     for message in selected:
-        line = f"{message.get('user')}: {_message_text(message)}"
+        line = f"{_message_author(message)}: {_message_text(message)}"
         if total + len(line) > MAX_CONTEXT_CHARS:
             remaining = MAX_CONTEXT_CHARS - total
             if remaining > 0:
@@ -590,7 +644,9 @@ def _audit_related_sources(channel: str, thread_ts: str) -> tuple[list[str], str
         return [], "none"
     sources: list[str] = []
     try:
-        for line in AUDIT_LOG.read_text(encoding="utf-8").splitlines():
+        with AUDIT_LOG.open(encoding="utf-8") as handle:
+            lines = deque(handle, maxlen=AUDIT_LOOKBACK_LINES)
+        for line in lines:
             if not line.strip():
                 continue
             try:
@@ -628,12 +684,13 @@ def _render_memory_card(
     messages: list[dict[str, Any]],
     related_sources: list[str],
     evidence_rel: str,
+    bot_user_id: str,
     promoted_at: str | None = None,
 ) -> str:
-    title = title_from_messages(channel, thread_ts, messages)
-    happened = _bounded_context(messages) or "No substantive human text captured."
-    resolution = _resolution(messages)
-    takeaway = _takeaway(messages)
+    title = title_from_messages(channel, thread_ts, messages, bot_user_id)
+    happened = _limit_section(_bounded_context(messages, bot_user_id) or "No substantive Slack text captured.")
+    outcome = _explicit_outcome(messages, bot_user_id)
+    takeaway = _takeaway(messages, bot_user_id)
     timestamp = promoted_at or datetime.now(timezone.utc).isoformat()
 
     lines = [
@@ -650,20 +707,17 @@ def _render_memory_card(
         "",
         happened,
         "",
-        "## Resolution",
-        "",
-        resolution,
-        "",
     ]
+    if outcome:
+        lines.extend(["## Outcome", "", _limit_section(outcome, 500), ""])
     if takeaway:
-        lines.extend(["## Reusable Takeaway", "", takeaway, ""])
+        lines.extend(["## Reusable Takeaway", "", _limit_section(takeaway, 500), ""])
     if related_sources:
         lines.extend(["## Related Sources", ""])
         lines.extend(f"- {source}" for source in related_sources)
         lines.append("")
     lines.extend(["## Evidence", "", f"Raw Slack thread snapshot: {evidence_rel}", ""])
-    text = "\n".join(lines)
-    return text[:MAX_CARD_CHARS].rstrip() + "\n" if len(text) > MAX_CARD_CHARS else text
+    return "\n".join(lines)
 
 
 def _item(event: dict[str, Any]) -> dict[str, Any]:
@@ -746,7 +800,7 @@ def handle_reaction_event(
         log_event("slack_thread_auto_promote_failed", error=str(exc), channel=channel, thread_ts=thread_ts)
         return {"status": "error", "error": str(exc)}
 
-    if not _human_messages(messages):
+    if not _card_messages(messages, bot_user_id):
         return {"status": "ignored", "reason": "empty_thread"}
 
     permalink, permalink_error = _permalink(client, channel, thread_ts)
@@ -773,6 +827,7 @@ def handle_reaction_event(
             messages=messages,
             related_sources=related_sources,
             evidence_rel=evidence_rel,
+            bot_user_id=bot_user_id,
         ),
         encoding="utf-8",
     )
@@ -874,6 +929,40 @@ def test_missing_audit_file_does_not_block_promotion(tmp_path, monkeypatch):
     assert result["related_sources_mode"] == "none"
     card = company_corpus / "slack" / "promoted" / "C123_1710000000.000000.md"
     assert "## Related Sources" not in card.read_text(encoding="utf-8")
+
+
+def test_related_source_lookup_uses_bounded_audit_tail(tmp_path, monkeypatch):
+    company_corpus, _ = _patch_promotion_paths(monkeypatch, tmp_path)
+    audit_log = tmp_path / "audit_log.jsonl"
+    monkeypatch.setattr(slack_promotion, "AUDIT_LOG", audit_log)
+    monkeypatch.setattr(slack_promotion, "AUDIT_LOOKBACK_LINES", 2)
+    old_match = json.dumps({
+        "type": "listener_reply",
+        "channel": "C123",
+        "thread_ts": "1710000000.000000",
+        "sources": ["company/corpus/old_source.md"],
+    })
+    audit_log.write_text(
+        old_match
+        + "\n"
+        + json.dumps({"type": "listener_skip", "channel": "C123"})
+        + "\n"
+        + json.dumps({"type": "listener_skip", "channel": "C123"})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = slack_promotion.handle_reaction_event(
+        _reaction_event(),
+        client=FakePromotionClient(),
+        allowed_channels={"C123"},
+        rate_limiter=slack_promotion.PromotionRateLimiter(),
+        bot_user_id="UBOT",
+    )
+
+    assert result["status"] == "promoted"
+    card = company_corpus / "slack" / "promoted" / "C123_1710000000.000000.md"
+    assert "company/corpus/old_source.md" not in card.read_text(encoding="utf-8")
 
 
 def test_user_rate_limit_blocks_second_distinct_thread(tmp_path, monkeypatch):
@@ -1273,6 +1362,8 @@ def test_readme_documents_slack_auto_promotion():
     readme = Path("README.md").read_text(encoding="utf-8")
 
     assert "PROMOTION_ALLOWED_CHANNELS" in readme
+    assert "reaction_added" in readme
+    assert "Event Subscriptions" in readme
     assert ":memo:" in readme
     assert ":brain:" in readme
     assert "company/corpus/slack/promoted/" in readme
@@ -1302,6 +1393,8 @@ Human-curated Slack memory capture is disabled by default. To enable it, set `PR
 ```text
 PROMOTION_ALLOWED_CHANNELS=C123,#engineering
 ```
+
+The Slack app must also subscribe to the `reaction_added` bot event under Slack App -> Event Subscriptions. Without that event subscription, Socket Mode never delivers reaction events and auto-promotion will not run.
 
 When a human reacts to a Slack message with `:memo:` or `:brain:` in an allowed channel, the listener promotes the parent thread into:
 
@@ -1373,7 +1466,7 @@ git status --short
 
 Expected: only intentional tracked changes are committed. The pre-existing untracked `docs/superpowers/plans/2026-05-16-dashboard-inbox-filter-reingest.md` may remain and must not be staged.
 
-- [ ] **Step 4: Manual dry-run shape check**
+- [ ] **Step 4: Local dry-run shape check**
 
 Run:
 
@@ -1409,7 +1502,55 @@ PY
 
 Expected: JSON-like dict printed with `status` either `promoted` on first run or `exists` on later runs, and paths under `company/corpus/slack/promoted/` plus `company/evidence/slack/`.
 
-- [ ] **Step 5: Commit any final verification-only docs correction**
+- [ ] **Step 5: Real Slack smoke test**
+
+Run this only when Slack tokens and an allowed test channel are available. If they are not available, record that the real Slack smoke test was not run in the final handoff.
+
+1. In the Slack app config, confirm Event Subscriptions includes the `reaction_added` bot event.
+2. Set `PROMOTION_ALLOWED_CHANNELS` in `.env` to the test channel ID or name.
+3. Check listener status:
+
+```bash
+uv run python scripts/slack_listener_status.py
+```
+
+If the listener is managed by systemd on ASUS, restart it after changing `.env`:
+
+```bash
+systemctl --user restart memory-claw-slack-listener.service
+```
+
+If running locally in a terminal, stop any old listener and start a fresh one:
+
+```bash
+uv run python scripts/slack_listener.py
+```
+
+4. In the allowed Slack channel, add `:memo:` to a thread message.
+5. Verify files were created:
+
+```bash
+ls company/corpus/slack/promoted
+ls company/evidence/slack
+```
+
+Expected: matching `<channel>_<thread_ts>.md` and `<channel>_<thread_ts>.json` files exist.
+
+6. Make the promoted card searchable:
+
+```bash
+uv run python scripts/ingest_corpus.py --force
+```
+
+7. Search for text from the promoted thread:
+
+```bash
+./bin/imem search-memory --query "Need precedent"
+```
+
+Expected: JSON includes the promoted card path under `company/corpus/slack/promoted/`.
+
+- [ ] **Step 6: Commit any final verification-only docs correction**
 
 If Step 1 or Step 2 forced a README or test correction, commit it:
 
