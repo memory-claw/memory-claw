@@ -13,9 +13,14 @@ STEPS = [
     "9. Configure OpenClaw native Ollama provider with model ollama/nemotron-3-super:120b and baseUrl http://127.0.0.1:11434",
     "10. Allowlist only the absolute bin/imem wrapper path",
     "11. Ask OpenClaw: Check the inbox now and process one new draft.",
-    "12. Verify Slack, audit_log.jsonl, and silent-case skipped_no_relevant_memory.",
-    "13. Record backup video under demo_artifacts/.",
-    "14. Run uv run python scripts/final_gate.py without skip flags.",
+    "12. Verify Slack receives the RFP message and audit_log.jsonl has driver=openclaw, count > 0, source=corpus/2023_rfp_postmortem.txt, slack_sent status=sent, processed status=sent.",
+    "13. ./bin/imem reset-demo",
+    "14. Create inbox/000_silent_clinical_trial_protocol.txt with the clinical trial protocol text from the plan.",
+    "15. Ask OpenClaw: Check the inbox now and process one new draft.",
+    "16. Verify no Slack message posts and audit_log.jsonl has driver=openclaw, memory_searched count: 0, and processed status=skipped_no_relevant_memory.",
+    "17. Reset demo state, restore only inbox/new_rfp_draft.txt, then wait for heartbeat to send the RFP Slack message.",
+    "18. Record backup video under demo_artifacts/ showing OpenClaw, audit tail, inbox file drop, and Slack message.",
+    "19. Run uv run python scripts/final_gate.py without skip flags.",
 ]
 
 
