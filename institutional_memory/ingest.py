@@ -105,6 +105,8 @@ def ingest_folder(folder: Path, force: bool = False) -> dict[str, int]:
         fingerprint = _fingerprint(path)
         if not force and registry.get(rel) == fingerprint:
             continue
+        if not force and rel in registry:
+            collection.delete(where={"source": rel})
 
         text = load_document_text(path)
         file_chunks = chunk_text(text, rel)

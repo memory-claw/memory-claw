@@ -143,7 +143,14 @@ def cmd_nemoclaw_probe(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imem", description="Institutional Memory Engine")
-    sub = parser.add_subparsers(dest="command", required=True)
+    visible_commands = (
+        "hello,list-new-drafts,read-draft,mark-processed,reset-demo,search-memory,send-slack"
+    )
+    sub = parser.add_subparsers(
+        dest="command",
+        required=True,
+        metavar=f"{{{visible_commands}}}",
+    )
 
     hello = sub.add_parser("hello", help="Smoke test")
     hello.set_defaults(func=cmd_hello)
@@ -185,6 +192,9 @@ def build_parser() -> argparse.ArgumentParser:
     probe = sub.add_parser("nemoclaw-probe", help=argparse.SUPPRESS)
     probe.add_argument("probe", choices=["denied-read", "denied-network"])
     probe.set_defaults(func=cmd_nemoclaw_probe)
+    sub._choices_actions = [
+        action for action in sub._choices_actions if action.dest != "nemoclaw-probe"
+    ]
 
     return parser
 
