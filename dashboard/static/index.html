@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>memory-claw</title>
+  <style>
+    :root {
+      --teal-dark: #0F6E56;
+      --teal: #1D9E75;
+      --teal-light: #E1F5EE;
+      --amber-dark: #BA7517;
+      --amber-light: #FAEEDA;
+      --purple-dark: #534AB7;
+      --purple-light: #EEEDFE;
+      --bg: #f8f7f4;
+      --panel: #ffffff;
+      --stat-bg: #f3f2ef;
+      --border: #e8e6e0;
+      --text: #1a1a1a;
+      --secondary: #6b6b6b;
+      --muted: #9b9b9b;
+      --gray-bg: #eceae6;
+      --gray-dot: #8a8a8a;
+      --red: #c0392b;
+      --blue: #2563eb;
+      --font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.45;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 20px 24px 32px; }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .logo { width: 28px; height: 28px; flex-shrink: 0; }
+    .brand-title { font-weight: 700; font-size: 15px; letter-spacing: -0.02em; }
+    .brand-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .topbar-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .updated { font-size: 11px; color: var(--muted); }
+    .hostname { font-size: 11px; color: var(--secondary); }
+    .pills { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+    }
+    .pill.ok { background: var(--teal-light); border-color: #b8e6d8; color: var(--teal-dark); }
+    .pill.warn { background: var(--amber-light); border-color: #ecd9a8; color: var(--amber-dark); }
+    .pill-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .threshold-pill {
+      font-size: 11px;
+      color: var(--teal-dark);
+      background: var(--teal-light);
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid #b8e6d8;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    @media (max-width: 900px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+    .stat {
+      background: var(--stat-bg);
+      border-radius: 8px;
+      padding: 16px 18px;
+    }
+    .stat-value { font-size: 28px; font-weight: 700; line-height: 1.1; }
+    .stat-label { font-size: 12px; color: var(--secondary); margin-top: 4px; }
+    .stat-sub { font-size: 10px; color: var(--muted); margin-top: 6px; }
+    .row { display: flex; gap: 16px; margin-bottom: 16px; }
+    .row-60-40 .col-left { flex: 0 0 60%; }
+    .row-60-40 .col-right { flex: 0 0 calc(40% - 16px); }
+    .row-62-38 .col-left { flex: 0 0 62%; }
+    .row-62-38 .col-right { flex: 0 0 calc(38% - 16px); }
+    @media (max-width: 900px) {
+      .row { flex-direction: column; }
+      .row .col-left, .row .col-right { flex: 1 1 auto !important; width: 100%; }
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      padding: 14px 16px;
+      height: 100%;
+      min-height: 280px;
+      display: flex;
+      flex-direction: column;
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      gap: 8px;
+    }
+    .panel-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .btn-sm {
+      font-family: var(--font);
+      font-size: 11px;
+      padding: 5px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--teal);
+      background: var(--teal-light);
+      color: var(--teal-dark);
+      cursor: pointer;
+    }
+    .btn-sm:hover { background: #d4f0e8; }
+    .btn-sm:disabled { opacity: 0.6; cursor: wait; }
+    .ingest-status {
+      font-size: 11px;
+      color: var(--teal-dark);
+      margin-left: 8px;
+      transition: opacity 0.4s ease;
+    }
+    .ingest-status.fade { opacity: 0; }
+    .ingest-spinner { color: var(--muted); }
+    .sparkbar {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      height: 20px;
+    }
+    .sparkbar span {
+      width: 4px;
+      background: var(--teal);
+      border-radius: 1px;
+      min-height: 2px;
+    }
+    .list { flex: 1; overflow-y: auto; max-height: 420px; }
+    .list-item {
+      display: flex;
+      gap: 10px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+      align-items: flex-start;
+    }
+    .list-item.clickable { cursor: pointer; }
+    .list-item.clickable:hover { background: #faf9f7; margin: 0 -8px; padding-left: 8px; padding-right: 8px; border-radius: 6px; }
+    .list-item:last-child { border-bottom: none; }
+    .icon-sq {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .icon-sq.new { background: var(--teal-light); }
+    .icon-sq.sent { background: var(--purple-light); }
+    .icon-sq.skipped { background: var(--gray-bg); }
+    .icon-sq.processing { background: #dbeafe; }
+    .item-body { flex: 1; min-width: 0; }
+    .item-title { font-weight: 600; font-size: 13px; line-height: 1.3; }
+    .item-filename { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .item-summary { font-size: 11px; color: var(--secondary); margin-top: 6px; line-height: 1.4; }
+    .item-meta-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+    .item-time { font-size: 10px; color: var(--muted); white-space: nowrap; padding-top: 2px; }
+    .badge {
+      display: inline-block;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      text-transform: lowercase;
+    }
+    .badge.new { background: var(--teal-light); color: var(--teal-dark); }
+    .badge.sent { background: var(--purple-light); color: var(--purple-dark); }
+    .badge.skipped { background: var(--gray-bg); color: var(--secondary); }
+    .badge.processing { background: #dbeafe; color: var(--blue); }
+    .source-pill {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: var(--purple-light);
+      color: var(--purple-dark);
+      border: 1px solid #d4d0f5;
+    }
+    .score-pill {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--teal-light);
+      color: var(--teal-dark);
+    }
+    .channel-pill { font-size: 10px; color: var(--muted); }
+    .tag {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-right: 8px;
+      flex-shrink: 0;
+    }
+    .tag.policy { background: var(--teal-light); color: var(--teal-dark); }
+    .tag.postmortem { background: var(--purple-light); color: var(--purple-dark); }
+    .tag.contract { background: var(--amber-light); color: var(--amber-dark); }
+    .tag.slack { background: #e8f4fc; color: #1e5a8a; }
+    .tag.rfp { background: #fce8f0; color: #8a1e4a; }
+    .tag.doc { background: var(--gray-bg); color: var(--secondary); }
+    .audit-item {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .audit-item.expandable { cursor: pointer; }
+    .audit-item:last-child { border-bottom: none; }
+    .audit-row-top { display: flex; gap: 8px; align-items: flex-start; }
+    .audit-ts { color: var(--muted); width: 42px; flex-shrink: 0; font-size: 11px; }
+    .audit-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+    .audit-dot.ingest { background: var(--teal); }
+    .audit-dot.slack_sent { background: var(--purple-dark); }
+    .audit-dot.skipped { background: var(--gray-dot); }
+    .audit-dot.error { background: var(--red); }
+    .audit-dot.other { background: var(--muted); }
+    .audit-body { flex: 1; min-width: 0; }
+    .audit-label { font-size: 11px; color: var(--text); font-weight: 600; }
+    .audit-preview {
+      font-size: 11px;
+      color: var(--secondary);
+      margin-top: 4px;
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .audit-sub { font-size: 10px; color: var(--muted); margin-top: 3px; }
+    .audit-sub.error { color: var(--red); }
+    .audit-toggle { font-size: 10px; color: var(--teal); margin-top: 4px; display: inline-block; }
+    .audit-full {
+      margin-top: 8px;
+      padding: 10px 12px;
+      background: var(--stat-bg);
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      font-size: 11px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .corpus-row {
+      display: flex;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .corpus-row:last-child { border-bottom: none; }
+    .corpus-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .corpus-chunks { color: var(--muted); font-size: 11px; margin-left: 8px; }
+    .stack-right { display: flex; flex-direction: column; gap: 16px; height: 100%; }
+    .panel-compact { min-height: auto; }
+    .kv-table { width: 100%; font-size: 12px; }
+    .kv-table tr td { padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .kv-table tr:last-child td { border-bottom: none; }
+    .kv-table td:first-child { color: var(--muted); width: 38%; }
+    .kv-table td:last-child { color: var(--text); word-break: break-all; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+    .empty {
+      padding: 24px 12px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <rect width="28" height="28" rx="4" fill="#1D9E75"/>
+          <path d="M8 20C8 14 12 8 20 6" stroke="#E1F5EE" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="M10 18C10 13 14 10 20 9" stroke="#0F6E56" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+        </svg>
+        <div>
+          <div class="brand-title">memory-claw</div>
+          <div class="brand-sub">Institutional Memory Engine</div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span class="updated" id="updated">updated —</span>
+        <span class="hostname" id="hostname"></span>
+        <div class="pills" id="status-pills"></div>
+      </div>
+    </header>
+
+    <section class="stats" id="stats"></section>
+
+    <section class="row row-60-40">
+      <div class="col-left">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-label">inbox</span>
+            <button type="button" class="btn-sm" id="btn-check-inbox" onclick="window.location.href='/inbox'">check inbox</button>
+          </div>
+          <div class="list" id="inbox-list"></div>
+        </div>
+      </div>
+      <div class="col-right">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-label">audit log</span>
+            <div class="sparkbar" id="sparkbar"></div>
+          </div>
+          <div class="list" id="audit-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="row row-62-38">
+      <div class="col-left">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-label">corpus</span>
+            <span style="display:flex;align-items:center">
+              <button type="button" class="btn-sm" id="btn-reingest">re-ingest</button>
+              <span class="ingest-status" id="ingest-status" aria-live="polite"></span>
+            </span>
+          </div>
+          <div class="list" id="corpus-list"></div>
+        </div>
+      </div>
+      <div class="col-right">
+        <div class="stack-right">
+          <div class="panel panel-compact">
+            <span class="panel-label">model</span>
+            <table class="kv-table" id="model-table"></table>
+          </div>
+          <div class="panel panel-compact">
+            <span class="panel-label">actions</span>
+            <div class="actions">
+              <button type="button" class="btn-sm" id="btn-run-check" onclick="window.location.href='/inbox'">run check</button>
+              <button type="button" class="btn-sm" id="btn-checklist" onclick="window.location.href='/checklist'">checklist</button>
+              <button type="button" class="btn-sm" id="btn-final-gate" onclick="window.location.href='/final-gate'">final gate</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const POLL_MS = 8000;
+    let lastFetch = Date.now();
+    let auditExpanded = new Set();
+
+    function esc(s) {
+      const d = document.createElement("div");
+      d.textContent = s == null ? "" : String(s);
+      return d.innerHTML;
+    }
+
+    function sourceBasename(src) {
+      if (!src) return "";
+      const parts = src.split("/");
+      return parts[parts.length - 1] || src;
+    }
+
+    function buildSparkbar(events) {
+      const recent = events.slice(-7);
+      const buckets = new Map();
+      recent.forEach((ev) => {
+        if (!ev.ts) return;
+        const h = String(ev.ts).split(":")[0] || "0";
+        buckets.set(h, (buckets.get(h) || 0) + 1);
+      });
+      const counts = recent.length ? [...buckets.values()] : [0, 0, 0, 0, 0, 0, 0];
+      while (counts.length < 7) counts.push(0);
+      return counts.slice(0, 7);
+    }
+
+    function auditDotClass(ev) {
+      const t = (ev.event || "").toLowerCase();
+      if (t.includes("ingest")) return "ingest";
+      if (t === "slack_sent") return "slack_sent";
+      if (t.includes("skipped")) return "skipped";
+      if (t.includes("error") || ev.error) return "error";
+      return "other";
+    }
+
+    function auditLabel(ev) {
+      const t = ev.event || "event";
+      if (t === "slack_sent") return "slack_sent";
+      if (t.includes("skipped")) return "skipped";
+      if (t.includes("ingest")) return "ingest";
+      if (ev.error) return "error";
+      return t;
+    }
+
+    function renderStatus(data) {
+      const pills = [
+        { label: "OpenClaw", ok: data.openclaw_ok },
+        { label: "Ollama", ok: data.ollama_ok },
+        { label: "Chroma", ok: data.chroma_ok },
+        { label: "Slack", ok: data.slack_ok },
+        { label: "Webhook", ok: data.slack_webhook_ok },
+      ];
+      const threshold = data.relevance_threshold != null
+        ? `<span class="threshold-pill">gate ${Number(data.relevance_threshold).toFixed(2)}</span>`
+        : "";
+      document.getElementById("status-pills").innerHTML = pills
+        .map((p) => `<span class="pill ${p.ok ? "ok" : "warn"}"><span class="pill-dot"></span>${esc(p.label)}</span>`)
+        .join("") + threshold;
+      document.getElementById("hostname").textContent = data.machine || "";
+    }
+
+    function renderStats(data) {
+      const cards = [
+        { label: "Corpus docs", value: data.corpus_docs, sub: "company/corpus/" },
+        { label: "Inbox queue", value: data.inbox_unprocessed, sub: `${data.inbox_total} total in inbox` },
+        { label: "Slack sent", value: data.slack_sent, sub: "audit_log.jsonl slack_sent" },
+        { label: "Vector chunks", value: data.vector_chunks, sub: "chroma_db / org_memory" },
+      ];
+      document.getElementById("stats").innerHTML = cards
+        .map(
+          (c) => `<div class="stat"><div class="stat-value">${esc(c.value)}</div><div class="stat-label">${esc(c.label)}</div><div class="stat-sub">${esc(c.sub)}</div></div>`
+        )
+        .join("");
+    }
+
+    function renderInbox(items) {
+      const el = document.getElementById("inbox-list");
+      if (!items.length) {
+        el.innerHTML = '<div class="empty">No inbox files yet — drop drafts in company/inbox/</div>';
+        return;
+      }
+      el.innerHTML = items
+        .map((item) => {
+          const pills = [];
+          if (item.matched_source) pills.push(`<span class="source-pill">${esc(sourceBasename(item.matched_source))}</span>`);
+          if (item.score != null) pills.push(`<span class="score-pill">${esc(Number(item.score).toFixed(2))}</span>`);
+          if (item.slack_channel && item.status === "sent") pills.push(`<span class="channel-pill">${esc(item.slack_channel)}</span>`);
+          return `<div class="list-item clickable" onclick="window.location.href='/inbox#${encodeURIComponent(item.path)}'">
+            <div class="icon-sq ${esc(item.status)}"></div>
+            <div class="item-body">
+              <div class="item-title">${esc(item.title)} <span class="badge ${esc(item.status)}">${esc(item.status)}</span></div>
+              <div class="item-filename">${esc(item.name)}</div>
+              <div class="item-summary">${esc(item.summary)}</div>
+              ${pills.length ? `<div class="item-meta-row">${pills.join("")}</div>` : ""}
+            </div>
+            <span class="item-time">${esc(item.mtime_ago)}</span>
+          </div>`;
+        })
+        .join("");
+    }
+
+    function renderAudit(events) {
+      const heights = buildSparkbar(events);
+      const maxH = Math.max(...heights, 1);
+      document.getElementById("sparkbar").innerHTML = heights
+        .map((h) => `<span style="height:${Math.max(2, (h / maxH) * 18)}px"></span>`)
+        .join("");
+
+      const el = document.getElementById("audit-list");
+      const show = events.slice(-20).reverse();
+      if (!show.length) {
+        el.innerHTML = '<div class="empty">No audit events — audit_log.jsonl</div>';
+        return;
+      }
+
+      el.innerHTML = show
+        .map((ev) => {
+          const key = `${ev.ts || ""}|${ev.event}|${ev.draft || ""}|${(ev.message_preview || "").slice(0, 24)}`;
+          const expanded = auditExpanded.has(key);
+          const isSlack = ev.event === "slack_sent" && ev.full_message;
+          let sub = "";
+          if (ev.event === "skipped" && ev.draft) sub = `<div class="audit-sub">skipped draft: ${esc(ev.draft)}</div>`;
+          else if (ev.ingest_detail) sub = `<div class="audit-sub">${esc(ev.ingest_detail)}</div>`;
+          else if (ev.error) sub = `<div class="audit-sub error">${esc(ev.error)}</div>`;
+          else if (ev.source && ev.event !== "slack_sent") sub = `<div class="audit-sub">${esc(sourceBasename(ev.source))}</div>`;
+          const preview = ev.message_preview ? `<div class="audit-preview">${esc(ev.message_preview)}</div>` : "";
+          const toggle = isSlack ? `<span class="audit-toggle">${expanded ? "hide message ▴" : "view full message ▾"}</span>` : "";
+          const full = isSlack && expanded ? `<div class="audit-full">${esc(ev.full_message)}</div>` : "";
+          return `<div class="audit-item ${isSlack ? "expandable" : ""}" data-audit-key="${esc(key)}">
+            <div class="audit-row-top">
+              <span class="audit-ts">${esc(ev.ts || "—")}</span>
+              <span class="audit-dot ${auditDotClass(ev)}"></span>
+              <div class="audit-body">
+                <div class="audit-label">${esc(auditLabel(ev))}</div>
+                ${preview}${sub}${toggle}${full}
+              </div>
+            </div>
+          </div>`;
+        })
+        .join("");
+
+      el.querySelectorAll(".audit-item.expandable").forEach((node) => {
+        node.addEventListener("click", () => {
+          const key = node.getAttribute("data-audit-key");
+          if (auditExpanded.has(key)) auditExpanded.delete(key);
+          else auditExpanded.add(key);
+          renderAudit(window._auditEvents || []);
+        });
+      });
+    }
+
+    function renderCorpus(items) {
+      const el = document.getElementById("corpus-list");
+      if (!items.length) {
+        el.innerHTML = '<div class="empty">No corpus documents — add files under company/corpus/</div>';
+        return;
+      }
+      el.innerHTML = items
+        .map(
+          (item) => `<div class="corpus-row">
+            <span class="tag ${esc(item.tag)}">${esc(item.tag)}</span>
+            <span class="corpus-name">${esc(item.name)}</span>
+            <span class="corpus-chunks">${esc(item.chunks)} chunks</span>
+          </div>`
+        )
+        .join("");
+    }
+
+    function renderModel(data) {
+      const rows = [
+        ["inference", data.inference_model],
+        ["embeddings", data.embedding_model],
+        ["ollama", data.ollama_url],
+        ["relevance gate", data.relevance_threshold],
+        ["top_k", data.top_k],
+        ["chunk_size", data.chunk_size],
+        ["chunk_overlap", data.chunk_overlap],
+        ["vector db", data.vector_db],
+        ["driver", data.driver],
+      ];
+      document.getElementById("model-table").innerHTML = rows
+        .map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`)
+        .join("");
+    }
+
+    function setUpdated() {
+      const sec = Math.floor((Date.now() - lastFetch) / 1000);
+      document.getElementById("updated").textContent = `updated ${sec}s ago`;
+    }
+
+    async function refresh() {
+      try {
+        const [status, stats, inbox, corpus, audit, model] = await Promise.all([
+          fetch("/api/status").then((r) => r.json()),
+          fetch("/api/stats").then((r) => r.json()),
+          fetch("/api/inbox").then((r) => r.json()),
+          fetch("/api/corpus").then((r) => r.json()),
+          fetch("/api/audit").then((r) => r.json()),
+          fetch("/api/model").then((r) => r.json()),
+        ]);
+        lastFetch = Date.now();
+        window._auditEvents = audit;
+        renderStatus(status);
+        renderStats(stats);
+        renderInbox(inbox);
+        renderCorpus(corpus);
+        renderAudit(audit);
+        renderModel(model);
+        setUpdated();
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function runReingest() {
+      const btn = document.getElementById("btn-reingest");
+      const statusEl = document.getElementById("ingest-status");
+      btn.disabled = true;
+      statusEl.classList.remove("fade");
+      statusEl.innerHTML = '<span class="ingest-spinner">...</span>';
+      try {
+        const data = await fetch("/api/run/ingest", { method: "POST" }).then((r) => r.json());
+        const msg = data.added > 0
+          ? `✓ ${data.added} doc${data.added === 1 ? "" : "s"} added`
+          : "✓ already up to date";
+        statusEl.textContent = msg;
+        refresh();
+      } catch (e) {
+        statusEl.textContent = "✗ ingest failed";
+      } finally {
+        btn.disabled = false;
+        setTimeout(() => statusEl.classList.add("fade"), 4000);
+        setTimeout(() => { statusEl.textContent = ""; statusEl.classList.remove("fade"); }, 4500);
+      }
+    }
+
+    document.getElementById("btn-reingest").addEventListener("click", runReingest);
+
+    refresh();
+    setInterval(refresh, POLL_MS);
+    setInterval(setUpdated, 1000);
+  </script>
+</body>
+</html>
