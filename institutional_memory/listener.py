@@ -272,25 +272,31 @@ def _handle_source_command(
     text: str,
     key: tuple[str, str],
     state: ListenerState,
-) -> str | None:
+) -> tuple[str, tuple[str, str, int] | None] | None:
     command = parse_source_command(text)
     if command is None:
         return None
 
     refs = state.thread_source_refs.get(key)
     if not refs:
-        return "I do not have a recent source list for this thread."
+        return ("I do not have a recent source list for this thread.", None)
 
+    cooldown_key = None
     if command.kind == "full":
         cooldown_key = (key[0], key[1], command.index)
         now = time.monotonic()
         previous = state.thread_full_source_cooldowns.get(cooldown_key)
         if previous is not None and now - previous < FULL_SOURCE_COOLDOWN_SECONDS:
             remaining = round(FULL_SOURCE_COOLDOWN_SECONDS - (now - previous))
-            return f"Please wait {remaining} seconds before showing full source {command.index} again."
-        state.thread_full_source_cooldowns[cooldown_key] = now
+            return (
+                f"Please wait {remaining} seconds before showing full source {command.index} again.",
+                None,
+            )
 
-    return render_source_command(command, refs)["text"]
+    rendered = render_source_command(command, refs)
+    if rendered.get("status") != "ok":
+        cooldown_key = None
+    return (rendered["text"], cooldown_key)
 
 
 def handle_listener_event(
@@ -342,11 +348,14 @@ def handle_listener_event(
             log_event("listener_error", channel=channel, error=str(exc))
             return {"status": "error", "error": str(exc)}
 
-    source_reply = _handle_source_command(command_text, key, state)
-    if source_reply:
+    source_result = _handle_source_command(command_text, key, state)
+    if source_result:
+        source_reply, cooldown_key = source_result
         advice_mode = state.thread_advice_modes.get(key, "offer")
         try:
             client.chat_postMessage(channel=channel, text=source_reply, thread_ts=thread_ts)
+            if cooldown_key is not None:
+                state.thread_full_source_cooldowns[cooldown_key] = time.monotonic()
             log_event(
                 "listener_reply",
                 channel=channel,

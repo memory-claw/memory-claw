@@ -618,6 +618,33 @@ def test_show_full_source_cooldown():
     search_memory.assert_not_called()
 
 
+def test_show_full_source_post_failure_does_not_set_cooldown():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    state.thread_source_refs[("C100", "1.0")] = [
+        {"source": "company/corpus/q3.md", "text": "Retention strategy", "access": "share"}
+    ]
+    client = MockWebClient()
+    client.chat_postMessage = MagicMock(side_effect=Exception("Slack down"))
+    event = {
+        "type": "message",
+        "channel": "C100",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "user": "U123",
+        "text": "show full source 1",
+    }
+
+    with patch("institutional_memory.listener.render_source_command", return_value={"status": "ok", "text": "full"}):
+        with patch("institutional_memory.listener.search_memory") as search_memory:
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "error"
+    assert state.thread_full_source_cooldowns == {}
+    search_memory.assert_not_called()
+
+
 def test_advice_command_post_failure_does_not_mutate_mode():
     state = _make_state()
     state.active_threads.add(("C100", "1.0"))
