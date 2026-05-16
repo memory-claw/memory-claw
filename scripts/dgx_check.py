@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing as mp
 import os
 import subprocess
 from pathlib import Path
+from collections.abc import Callable
 
 import ollama
 
@@ -32,6 +34,42 @@ def run(*command: str, timeout: int = 120) -> tuple[int, str]:
     return result.returncode, result.stdout + result.stderr
 
 
+def default_model_probe() -> str:
+    response = ollama.Client(host=OLLAMA_BASE_URL).chat(
+        model=LLM_MODEL,
+        messages=[{"role": "user", "content": "Reply with READY."}],
+        options={"num_predict": 8},
+    )
+    return response["message"]["content"]
+
+
+def _model_smoke_worker(probe: Callable[[], str], queue: mp.Queue) -> None:
+    try:
+        queue.put({"ok": True, "content": probe()})
+    except Exception as exc:
+        queue.put({"ok": False, "error": str(exc)})
+
+
+def model_smoke(
+    probe: Callable[[], str] = default_model_probe,
+    timeout_seconds: float = 90,
+) -> tuple[bool, str]:
+    queue: mp.Queue = mp.Queue()
+    process = mp.Process(target=_model_smoke_worker, args=(probe, queue))
+    process.start()
+    process.join(timeout_seconds)
+    if process.is_alive():
+        process.terminate()
+        process.join(5)
+        return False, f"model smoke timed out after {timeout_seconds:g}s"
+    result = queue.get() if not queue.empty() else {"ok": False, "error": "model smoke returned no result"}
+    if not result["ok"]:
+        return False, f"model smoke failed: {result['error']}"
+    if "READY" not in result["content"].upper():
+        return False, "model smoke did not return READY"
+    return True, "model smoke returned READY"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="DGX/ASUS readiness check")
     parser.add_argument("--skip-model-smoke", action="store_true")
@@ -49,16 +87,9 @@ def main() -> int:
         blockers.append("SLACK_CHANNEL missing")
 
     if not args.skip_model_smoke:
-        try:
-            response = ollama.Client(host=OLLAMA_BASE_URL).chat(
-                model=LLM_MODEL,
-                messages=[{"role": "user", "content": "Reply with READY."}],
-                options={"num_predict": 8},
-            )
-            if "READY" not in response["message"]["content"].upper():
-                blockers.append("model smoke did not return READY")
-        except Exception as exc:
-            blockers.append(f"model smoke failed: {exc}")
+        ok, message = model_smoke()
+        if not ok:
+            blockers.append(message)
 
     if not args.skip_backup_video:
         videos = list(DEMO_ARTIFACTS_PATH.glob("*.mov")) + list(DEMO_ARTIFACTS_PATH.glob("*.mp4"))

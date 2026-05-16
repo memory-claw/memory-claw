@@ -1,6 +1,12 @@
 import subprocess
+import time
 
 from scripts import dgx_check
+
+
+def slow_ready_probe():
+    time.sleep(1)
+    return "READY"
 
 
 def test_run_reports_timeout_as_output(monkeypatch):
@@ -13,3 +19,10 @@ def test_run_reports_timeout_as_output(monkeypatch):
 
     assert code == 124
     assert "timeout after 3s" in output
+
+
+def test_model_smoke_reports_timeout(monkeypatch):
+    assert dgx_check.model_smoke(slow_ready_probe, timeout_seconds=0.01) == (
+        False,
+        "model smoke timed out after 0.01s",
+    )
