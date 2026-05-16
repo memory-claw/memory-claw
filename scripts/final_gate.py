@@ -1,0 +1,258 @@
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+
+from institutional_memory.config import AUDIT_LOG, PROJECT_ROOT
+
+GENERIC_QUERY_WORDS = {
+    "draft",
+    "new",
+    "rfp",
+    "memory",
+    "context",
+    "document",
+    "file",
+    "inbox",
+    "search",
+}
+
+RFP_SOURCE = "corpus/2023_rfp_postmortem.txt"
+RFP_DRAFT = "inbox/new_rfp_draft.txt"
+SILENT_DRAFT = "inbox/000_silent_clinical_trial_protocol.txt"
+
+
+def run(command: list[str], timeout: int = 180) -> dict:
+    try:
+        result = subprocess.run(
+            command,
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return {
+            "command": command,
+            "ok": result.returncode == 0,
+            "stdout": result.stdout[-2000:],
+            "stderr": result.stderr[-2000:],
+        }
+    except subprocess.TimeoutExpired:
+        return {"command": command, "ok": False, "error": f"timeout after {timeout}s"}
+
+
+def _find_index(events: list[dict], start: int, **fields: str) -> int | None:
+    for index, event in enumerate(events[start:], start=start):
+        if all(event.get(key) == value for key, value in fields.items()):
+            return index
+    return None
+
+
+def _find_matching_index(events: list[dict], start: int, predicate) -> int | None:
+    for index, event in enumerate(events[start:], start=start):
+        if predicate(event):
+            return index
+    return None
+
+
+def _has_sent_slack(events: list[dict], start: int, end: int) -> bool:
+    return any(
+        event.get("type") == "slack_sent"
+        and event.get("driver") == "openclaw"
+        and event.get("status") == "sent"
+        for event in events[start:end]
+    )
+
+
+def audit_blockers(audit_text: str | None = None) -> list[str]:
+    if audit_text is None and not AUDIT_LOG.exists():
+        return ["audit_log.jsonl missing"]
+    if audit_text is None:
+        audit_text = AUDIT_LOG.read_text(encoding="utf-8")
+    events = []
+    blockers = []
+    for line_number, line in enumerate(audit_text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            blockers.append(f"malformed audit line {line_number}")
+            continue
+        if not isinstance(event, dict):
+            blockers.append(f"non-object audit line {line_number}")
+            continue
+        events.append(event)
+    required = {"draft_listed", "draft_read", "memory_searched", "slack_sent", "processed"}
+    seen = {event.get("type") for event in events}
+    blockers.extend(f"missing audit event: {event}" for event in sorted(required - seen))
+    processed_statuses = {
+        event.get("status")
+        for event in events
+        if event.get("type") == "processed" and event.get("driver") == "openclaw"
+    }
+    if "sent" not in processed_statuses:
+        blockers.append("missing success processed proof")
+    if "skipped_no_relevant_memory" not in processed_statuses:
+        blockers.append("missing silent-case processed proof")
+    if not any(
+        event.get("type") == "draft_read"
+        and event.get("driver") == "openclaw"
+        and event.get("path") == RFP_DRAFT
+        for event in events
+    ):
+        blockers.append("missing RFP draft_read proof")
+    if not any(
+        event.get("type") == "draft_read"
+        and event.get("driver") == "openclaw"
+        and event.get("path") == SILENT_DRAFT
+        for event in events
+    ):
+        blockers.append("missing silent draft_read proof")
+    if not any(
+        event.get("type") == "processed"
+        and event.get("driver") == "openclaw"
+        and event.get("path") == RFP_DRAFT
+        and event.get("status") == "sent"
+        for event in events
+    ):
+        blockers.append("missing RFP processed proof")
+    if not any(
+        event.get("type") == "processed"
+        and event.get("driver") == "openclaw"
+        and event.get("path") == SILENT_DRAFT
+        and event.get("status") == "skipped_no_relevant_memory"
+        for event in events
+    ):
+        blockers.append("missing silent processed proof")
+    if not any(
+        event.get("type") == "memory_searched"
+        and event.get("driver") == "openclaw"
+        and isinstance(event.get("count"), int)
+        and event.get("count") > 0
+        for event in events
+    ):
+        blockers.append("missing success positive-hit search proof")
+    if not any(
+        event.get("type") == "memory_searched"
+        and event.get("driver") == "openclaw"
+        and event.get("source") == RFP_SOURCE
+        for event in events
+    ):
+        blockers.append("missing RFP postmortem source proof")
+    if not any(
+        event.get("type") == "memory_searched"
+        and event.get("driver") == "openclaw"
+        and event.get("count") == 0
+        for event in events
+    ):
+        blockers.append("missing silent zero-hit search proof")
+    if not any(
+        event.get("type") == "slack_sent"
+        and event.get("driver") == "openclaw"
+        and event.get("status") == "sent"
+        for event in events
+    ):
+        blockers.append("missing sent Slack proof")
+    if not any(
+        event.get("type") == "slack_sent"
+        and event.get("driver") == "openclaw"
+        and event.get("status") == "sent"
+        and RFP_SOURCE in event.get("source_attributions", [])
+        for event in events
+    ):
+        blockers.append("missing Slack source attribution proof")
+    rfp_read_index = _find_index(
+        events,
+        0,
+        type="draft_read",
+        driver="openclaw",
+        path=RFP_DRAFT,
+    )
+    rfp_success_ordered = False
+    if rfp_read_index is not None:
+        rfp_search_index = _find_matching_index(
+            events,
+            rfp_read_index + 1,
+            lambda event: event.get("type") == "memory_searched"
+            and event.get("driver") == "openclaw"
+            and isinstance(event.get("count"), int)
+            and event.get("count") > 0
+            and event.get("source") == RFP_SOURCE,
+        )
+        if rfp_search_index is not None:
+            rfp_slack_index = _find_matching_index(
+                events,
+                rfp_search_index + 1,
+                lambda event: event.get("type") == "slack_sent"
+                and event.get("driver") == "openclaw"
+                and event.get("status") == "sent"
+                and RFP_SOURCE in event.get("source_attributions", []),
+            )
+            if rfp_slack_index is not None:
+                rfp_success_ordered = (
+                    _find_index(
+                        events,
+                        rfp_slack_index + 1,
+                        type="processed",
+                        driver="openclaw",
+                        path=RFP_DRAFT,
+                        status="sent",
+                    )
+                    is not None
+                )
+    if not rfp_success_ordered:
+        blockers.append("missing ordered RFP success proof")
+    silent_read_index = _find_index(
+        events,
+        0,
+        type="draft_read",
+        driver="openclaw",
+        path=SILENT_DRAFT,
+    )
+    if silent_read_index is not None:
+        silent_processed_index = _find_index(
+            events,
+            silent_read_index + 1,
+            type="processed",
+            driver="openclaw",
+            path=SILENT_DRAFT,
+            status="skipped_no_relevant_memory",
+        )
+        if silent_processed_index is None:
+            blockers.append("missing ordered silent processed proof")
+        elif _has_sent_slack(events, silent_read_index + 1, silent_processed_index):
+            blockers.append("silent case posted Slack")
+    for event in events:
+        if event.get("type") in required and event.get("driver") != "openclaw":
+            blockers.append(f"non-openclaw proof for {event.get('type')}: {event.get('driver')}")
+        if event.get("type") == "memory_searched":
+            query = str(event.get("query", ""))
+            words = query.split()
+            if not (2 <= len(words) <= 6):
+                blockers.append(f"query not focused 2-6 words: {query}")
+            normalized_words = {word.strip(".,:;!?()[]{}").lower() for word in words}
+            if normalized_words and normalized_words <= GENERIC_QUERY_WORDS:
+                blockers.append(f"generic search query: {query}")
+            if len(words) >= 25 or len(query) >= 180:
+                blockers.append(f"full-draft-style search query: {query[:120]}")
+    return blockers
+
+
+def main() -> int:
+    audit_text = AUDIT_LOG.read_text(encoding="utf-8") if AUDIT_LOG.exists() else None
+    checks = [
+        run(["uv", "run", "pytest", "-q"]),
+        run(["uv", "run", "python", "scripts/cosine_sanity.py"]),
+        run(["uv", "run", "python", "scripts/nemoclaw_scaffold_check.py"]),
+        run(["uv", "run", "python", "scripts/dgx_check.py"]),
+    ]
+    blockers = [check for check in checks if not check["ok"]]
+    blockers.extend({"command": ["audit"], "ok": False, "error": item} for item in audit_blockers(audit_text))
+    print(json.dumps({"ok": not blockers, "blockers": blockers}, ensure_ascii=False, indent=2))
+    return 0 if not blockers else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,3 @@
+Security Review Summary
+
+The security team completed access reviews, vendor risk follow-up, and single sign-on policy checks. Remaining work includes improving incident tabletop documentation and retention tagging.

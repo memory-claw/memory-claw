@@ -1,0 +1,3 @@
+Legal Vendor Terms
+
+Vendor agreements should document data processing roles, termination rights, audit obligations, and insurance requirements. Unusual indemnity requests require legal review before signature.

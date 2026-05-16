@@ -1,0 +1,5 @@
+2023 RFP Postmortem: Meridian Bid
+
+The Meridian bid was lost in 2023 after the customer review focused on liability caps in clause 7.4, indemnification language, and ambiguity in the risk-sharing framework. The deal desk noted that our preferred limitation of liability did not match the procurement team's expected commercial posture.
+
+For future RFP responses, legal and sales should align early on indemnification, liability caps, clause numbering, and fallback language. A concise explanation of why clause 7.4 protects both sides should be included before final submission.

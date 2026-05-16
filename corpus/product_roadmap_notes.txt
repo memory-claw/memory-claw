@@ -1,0 +1,3 @@
+Product Roadmap Notes
+
+The roadmap emphasizes account analytics, workflow approvals, and faster reporting exports. Customer advisory board feedback favored reliability improvements over broad visual redesign work.
