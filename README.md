@@ -66,3 +66,5 @@ workspace with `SOUL.md`, `HEARTBEAT.md`, and the institutional-memory skill.
 Override `ASUS_USER_HOST`, `ASUS_TAILSCALE_IP`, `ASUS_REPO`, `ASUS_BRANCH`,
 `ASUS_SSH_KEY`, or `OPENCLAW_WORKSPACE` for manual runs if the ASUS checkout or
 OpenClaw workspace differs from `~/memory-claw` and `~/.openclaw/workspace`.
+
+test
