@@ -70,6 +70,11 @@ def send_slack_message(
                 "source_attributions": source_attributions(text),
             }
         except SlackApiError as exc:
+            if not SLACK_WEBHOOK_URL:
+                return {
+                    "status": "slack_failed",
+                    "error": exc.response.get("error", "slack_api_error"),
+                }
             fallback = _webhook_post(text)
             if fallback["status"] == "sent":
                 fallback["bot_token_error"] = exc.response.get("error", "slack_api_error")
