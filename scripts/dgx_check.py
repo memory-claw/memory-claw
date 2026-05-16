@@ -70,6 +70,16 @@ def model_smoke(
     return True, "model smoke returned READY"
 
 
+def backup_video_blockers(path: Path = DEMO_ARTIFACTS_PATH) -> list[str]:
+    videos = sorted(list(path.glob("*.mov")) + list(path.glob("*.mp4")))
+    if not videos:
+        return ["backup video missing under demo_artifacts/"]
+    if any(video.stat().st_size > 0 for video in videos):
+        return []
+    empty = ", ".join(video.name for video in videos)
+    return [f"backup video is empty: {empty}"]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="DGX/ASUS readiness check")
     parser.add_argument("--skip-model-smoke", action="store_true")
@@ -92,9 +102,7 @@ def main() -> int:
             blockers.append(message)
 
     if not args.skip_backup_video:
-        videos = list(DEMO_ARTIFACTS_PATH.glob("*.mov")) + list(DEMO_ARTIFACTS_PATH.glob("*.mp4"))
-        if not videos:
-            blockers.append("backup video missing under demo_artifacts/")
+        blockers.extend(backup_video_blockers())
 
     print(json.dumps({"ok": not blockers, "blockers": blockers}, ensure_ascii=False))
     return 0 if not blockers else 1

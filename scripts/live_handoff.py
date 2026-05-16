@@ -19,7 +19,7 @@ STEPS = [
     "15. Ask OpenClaw: Check the inbox now and process one new draft.",
     "16. Verify no Slack message posts and audit_log.jsonl has driver=openclaw, memory_searched count: 0, and processed status=skipped_no_relevant_memory.",
     "17. ./bin/imem reset-demo, then uv run python scripts/demo_case.py rfp, then wait for heartbeat to send the RFP Slack message.",
-    "18. Record backup video under demo_artifacts/ showing OpenClaw, audit tail, inbox file drop, and Slack message.",
+    "18. Record a non-empty .mp4 or .mov backup video under demo_artifacts/ showing OpenClaw, audit tail, inbox file drop, and Slack message.",
     "19. Run uv run python scripts/final_gate.py without skip flags.",
 ]
 

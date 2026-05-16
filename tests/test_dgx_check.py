@@ -26,3 +26,15 @@ def test_model_smoke_reports_timeout(monkeypatch):
         False,
         "model smoke timed out after 0.01s",
     )
+
+
+def test_backup_video_check_rejects_empty_placeholder(tmp_path):
+    (tmp_path / "placeholder.mp4").write_bytes(b"")
+
+    assert dgx_check.backup_video_blockers(tmp_path) == [
+        "backup video is empty: placeholder.mp4"
+    ]
+
+    (tmp_path / "real.mp4").write_bytes(b"video bytes")
+
+    assert dgx_check.backup_video_blockers(tmp_path) == []

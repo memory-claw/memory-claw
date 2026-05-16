@@ -9,3 +9,4 @@ def test_handoff_names_final_gate_proof_artifacts():
     assert "uv run python scripts/demo_case.py silent" in text
     assert "uv run python scripts/demo_case.py rfp" in text
     assert "count: 0" in text
+    assert "non-empty" in text
