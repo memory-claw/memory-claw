@@ -9,6 +9,10 @@ def slow_ready_probe():
     return "READY"
 
 
+def ready_text_probe():
+    return 'The user says: "Reply with READY." So respond with READY.'
+
+
 def test_run_reports_timeout_as_output(monkeypatch):
     def raise_timeout(*args, **kwargs):
         raise subprocess.TimeoutExpired(cmd=["slow"], timeout=3)
@@ -60,9 +64,8 @@ def test_default_model_probe_reads_thinking_when_content_empty(monkeypatch):
 
     monkeypatch.setattr(dgx_check.ollama, "Client", FakeClient)
 
-    text = dgx_check.default_model_probe()
-    assert "READY" in text.upper()
-    assert dgx_check.model_smoke(lambda: text, timeout_seconds=5) == (
+    assert "READY" in dgx_check.default_model_probe().upper()
+    assert dgx_check.model_smoke(ready_text_probe, timeout_seconds=5) == (
         True,
         "model smoke returned READY",
     )
