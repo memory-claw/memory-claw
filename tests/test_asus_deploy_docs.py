@@ -29,30 +29,16 @@ def test_deploy_script_uses_tailscale_and_ssh_key_without_password():
     assert "password" not in script.lower()
 
 
-def test_github_action_deploys_over_tailscale_without_password():
-    workflow = Path(".github/workflows/deploy-asus.yml").read_text(encoding="utf-8")
-
-    assert "tailscale/github-action@v4" in workflow
-    assert "main" in workflow
-    assert "codex/institutional-memory-engine" in workflow
-    assert "100.68.221.47" in workflow
-    assert "ASUS_SSH_KEY" in workflow
-    assert "secrets.SLACK_BOT_TOKEN" in workflow
-    assert "vars.SLACK_CHANNEL" in workflow
-    assert "scripts/deploy_asus.sh" in workflow
-    assert "sshpass" not in workflow
-    assert "password" not in workflow.lower()
+def test_no_github_actions_auto_deploy_workflow():
+    assert not Path(".github/workflows/deploy-asus.yml").exists()
 
 
 def test_readme_documents_asus_push_deploy():
     readme = Path("README.md").read_text(encoding="utf-8")
 
-    assert ".github/workflows/deploy-asus.yml" in readme
+    assert "ASUS webhook" in readme
     assert "scripts/deploy_asus.sh" in readme
     assert "ASUS_SSH_KEY" in readme
     assert "ASUS_BRANCH" in readme
     assert "OpenClaw workspace" in readme
-    assert "TS_OAUTH_CLIENT_ID" in readme
     assert "tailscale ping 100.68.221.47" in readme
-    assert "shared machine" in readme
-    assert "tagged GitHub Actions node" in readme

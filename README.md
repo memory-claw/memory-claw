@@ -36,19 +36,11 @@ uv run python scripts/final_gate.py
 
 Do not call the goal complete until that command passes on ASUS.
 
-## Push Deploy
+## ASUS Deploy
 
 Use SSH key auth over Tailscale. Do not store the ASUS login password in this
-repo or in a workflow. Push deploy is defined in
-`.github/workflows/deploy-asus.yml`.
-
-GitHub secrets required:
-
-```bash
-ASUS_SSH_KEY          # private deploy key that can SSH to asus@100.68.221.47
-TS_OAUTH_CLIENT_ID    # Tailscale OAuth client id
-TS_OAUTH_SECRET       # Tailscale OAuth secret
-```
+repo or in a workflow. GitHub Actions auto-deploy is intentionally disabled
+because ASUS already has an ASUS webhook script.
 
 One-time ASUS SSH key setup from this Mac:
 
@@ -59,20 +51,9 @@ tailscale ping 100.68.221.47
 ASUS_SSH_KEY=~/.ssh/asus_deploy scripts/deploy_asus.sh
 ```
 
-Each push to `codex/institutional-memory-engine` runs `scripts/deploy_asus.sh`
-from GitHub Actions over Tailscale. The script fetches that branch on ASUS and
-checks it out over the old `main` checkout. It also updates the OpenClaw
-workspace with `SOUL.md`, `HEARTBEAT.md`, and the institutional-memory skill.
-Override `ASUS_USER_HOST`, `ASUS_TAILSCALE_IP`, `ASUS_REPO`, `ASUS_BRANCH`,
-`ASUS_SSH_KEY`, or `OPENCLAW_WORKSPACE` for manual runs if the ASUS checkout or
-OpenClaw workspace differs from `~/memory-claw` and `~/.openclaw/workspace`.
-
-If GitHub Actions prints `no matching peer`, the secrets can still be correct.
-That means the tagged GitHub Actions node joined Tailscale but cannot see the
-ASUS peer. A shared machine accepted by this Mac is not enough for the tagged
-GitHub Actions node. Put ASUS in the same tailnet as the OAuth client, or create
-the OAuth client/tag/ACL in the tailnet that owns ASUS.
-
-test
-
-test
+The script fetches the target branch on ASUS and checks it out over the old
+checkout. It also updates the OpenClaw workspace with `SOUL.md`,
+`HEARTBEAT.md`, and the institutional-memory skill. Override `ASUS_USER_HOST`,
+`ASUS_TAILSCALE_IP`, `ASUS_REPO`, `ASUS_BRANCH`, `ASUS_SSH_KEY`, or
+`OPENCLAW_WORKSPACE` for manual runs if the ASUS checkout or OpenClaw workspace
+differs from `~/memory-claw` and `~/.openclaw/workspace`.
