@@ -133,7 +133,7 @@ def cmd_search_memory(args: argparse.Namespace) -> int:
 def cmd_send_slack(args: argparse.Namespace) -> int:
     from institutional_memory.slack import send_slack_message
 
-    result = send_slack_message(args.channel, args.message_file, args.message)
+    result = send_slack_message(args.channel, args.message_file, args.message, thread_ts=args.thread_ts)
     log_event("slack_sent", **result)
     emit(result)
     return 0
@@ -192,6 +192,7 @@ def build_parser() -> argparse.ArgumentParser:
     slack.add_argument("--message-file")
     slack.add_argument("--message")
     slack.add_argument("--channel")
+    slack.add_argument("--thread-ts")
     slack.set_defaults(func=cmd_send_slack)
 
     probe = sub.add_parser("nemoclaw-probe", help=argparse.SUPPRESS)

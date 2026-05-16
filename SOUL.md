@@ -15,7 +15,7 @@ On each turn:
 9. If search returns an error, call `mark-processed` with status `search_failed` or `tool_error` and stop.
 10. If results exist, write a 2-3 sentence Slack message as a knowledgeable colleague. Include the source filename. Avoid these words and phrases: detected, triggered, alert, notification, As an AI.
 11. Write the message to `.runtime/slack_message.txt`.
-12. Call `./bin/imem send-slack --message-file .runtime/slack_message.txt`.
+12. If the `read-draft` JSON includes `slack_channel_id` and `slack_thread_ts`, call `./bin/imem send-slack --message-file .runtime/slack_message.txt --channel <slack_channel_id> --thread-ts <slack_thread_ts>`. Otherwise call `./bin/imem send-slack --message-file .runtime/slack_message.txt`.
 13. Always finish by calling `./bin/imem mark-processed --path <path> --status <status> --reason "<reason>" --query "<query>" --top-score <score> --source "<source>"`.
 
 Use status `sent` only after Slack returns `{"status":"sent"}`. Use `slack_failed` if Slack delivery fails.

@@ -7,13 +7,24 @@ from institutional_memory.documents import load_document_text
 from institutional_memory.paths import safe_inbox_path
 from institutional_memory.state import load_processed_records
 
+SLACK_METADATA = {
+    "channel": "slack_channel_id",
+    "slack_channel_id": "slack_channel_id",
+    "thread ts": "slack_thread_ts",
+    "slack_thread_ts": "slack_thread_ts",
+    "permalink": "slack_permalink",
+    "slack_permalink": "slack_permalink",
+}
+
 
 def list_new_drafts() -> list[str]:
     if not INBOX_PATH.exists():
         return []
     processed = {record.get("path") for record in load_processed_records()}
     drafts: list[str] = []
-    for path in sorted(INBOX_PATH.iterdir()):
+    for path in sorted(INBOX_PATH.rglob("*")):
+        if not path.is_file():
+            continue
         if path.name == ".gitkeep" or path.suffix.lower() not in {".txt", ".md", ".pdf"}:
             continue
         rel = str(path.resolve().relative_to(PROJECT_ROOT))
@@ -22,6 +33,34 @@ def list_new_drafts() -> list[str]:
     return drafts
 
 
+def _metadata_key(raw: str) -> str:
+    key = raw.strip().strip("*").replace("_", " ").lower()
+    return SLACK_METADATA.get(key, "")
+
+
+def _slack_metadata(text: str) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    for line in text.splitlines()[:40]:
+        stripped = line.strip()
+        if stripped.startswith("**") and ":**" in stripped:
+            raw_key, value = stripped.split(":**", 1)
+            key = _metadata_key(raw_key)
+        elif ":" in stripped:
+            raw_key, value = stripped.split(":", 1)
+            key = _metadata_key(raw_key)
+        else:
+            continue
+        value = value.strip()
+        if key and value:
+            metadata[key] = value
+    return metadata
+
+
 def read_draft(path: str) -> dict[str, str]:
     safe_path = safe_inbox_path(path)
-    return {"path": str(safe_path.relative_to(PROJECT_ROOT)), "text": load_document_text(safe_path)}
+    text = load_document_text(safe_path)
+    return {
+        "path": str(safe_path.relative_to(PROJECT_ROOT)),
+        "text": text,
+        **_slack_metadata(text),
+    }

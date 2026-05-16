@@ -52,6 +52,7 @@ def send_slack_message(
     channel: str | None,
     message_file: str | None,
     message: str | None,
+    thread_ts: str | None = None,
 ) -> dict:
     try:
         text = _read_message(message_file, message).strip()
@@ -63,12 +64,18 @@ def send_slack_message(
     target = channel or SLACK_CHANNEL
     if SLACK_BOT_TOKEN:
         try:
-            WebClient(token=SLACK_BOT_TOKEN).chat_postMessage(channel=target, text=text)
-            return {
+            payload = {"channel": target, "text": text}
+            if thread_ts:
+                payload["thread_ts"] = thread_ts
+            WebClient(token=SLACK_BOT_TOKEN).chat_postMessage(**payload)
+            result = {
                 "status": "sent",
                 "channel": target,
                 "source_attributions": source_attributions(text),
             }
+            if thread_ts:
+                result["thread_ts"] = thread_ts
+            return result
         except SlackApiError as exc:
             if not SLACK_WEBHOOK_URL:
                 return {
