@@ -3,6 +3,7 @@ name: Deploy ASUS
 on:
   push:
     branches:
+      - main
       - codex/institutional-memory-engine
   workflow_dispatch:
 
@@ -12,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: tailscale/github-action@v3
+      - uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
@@ -32,4 +33,5 @@ jobs:
           ASUS_SSH_KEY: /home/runner/.ssh/asus_deploy
           ASUS_TAILSCALE_IP: 100.68.221.47
           ASUS_USER_HOST: asus@100.68.221.47
+          ASUS_BRANCH: ${{ github.ref_name }}
         run: scripts/deploy_asus.sh
