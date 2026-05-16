@@ -544,6 +544,7 @@ dependencies = [
     { name = "pymupdf" },
     { name = "pymupdf4llm" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "slack-sdk" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -561,6 +562,7 @@ requires-dist = [
     { name = "pymupdf", specifier = ">=1.27.2.3" },
     { name = "pymupdf4llm", specifier = ">=1.27.2.3" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "slack-sdk", specifier = ">=3.27.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
 ]

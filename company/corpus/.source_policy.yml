@@ -1,0 +1,12 @@
+# Rules are evaluated top to bottom; the last matching rule wins.
+# Keep broad rules first and sensitive overrides last.
+default: restricted
+rules:
+  - pattern: "company/corpus/mock_data/**"
+    access: share
+  - pattern: "company/corpus/2023_rfp_postmortem.txt"
+    access: share
+  - pattern: "company/corpus/mock_data/policy_docs/Secrets_Management_Policy.md"
+    access: cite_only
+  - pattern: "company/corpus/mock_data/incidents/GitHub_Credentials_Leak_2023.md"
+    access: restricted
