@@ -31,7 +31,7 @@ from institutional_memory.listener import (
     resolve_channels,
 )
 from institutional_memory.slack_ingest import handle_message_event
-from institutional_memory.slack_promotion import PromotionRateLimiter
+from institutional_memory.slack_promotion import PromotionRateLimiter, handle_reaction_event
 
 
 def _build_state(web_client: WebClient) -> ListenerState:
@@ -63,6 +63,17 @@ def process(
     if request.type == "events_api":
         client.send_socket_mode_response(SocketModeResponse(envelope_id=request.envelope_id))
         event = request.payload.get("event", {})
+
+        if event.get("type") == "reaction_added":
+            result = handle_reaction_event(
+                event=event,
+                client=web_client,
+                allowed_channels=state.promotion_allowed_channels,
+                rate_limiter=state.promotion_rate_limiter,
+                bot_user_id=state.bot_user_id,
+            )
+            print(json.dumps(result, ensure_ascii=False), flush=True)
+            return
 
         # Existing ingestion (write to inbox)
         try:
