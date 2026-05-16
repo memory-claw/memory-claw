@@ -10,6 +10,7 @@ COMMANDS = [
     "cp .env.example .env  # then set Slack secrets",
     "./bin/imem reset-demo --clear-audit --clear-chroma",
     "uv run python scripts/ingest_corpus.py --force",
+    "uv run python scripts/cosine_sanity.py",
     "uv run python scripts/dgx_check.py",
 ]
 

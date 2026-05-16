@@ -6,6 +6,18 @@ from pathlib import Path
 
 from institutional_memory.config import AUDIT_LOG, PROJECT_ROOT
 
+GENERIC_QUERY_WORDS = {
+    "draft",
+    "new",
+    "rfp",
+    "memory",
+    "context",
+    "document",
+    "file",
+    "inbox",
+    "search",
+}
+
 
 def run(command: list[str], timeout: int = 180) -> dict:
     try:
@@ -33,6 +45,22 @@ def audit_blockers() -> list[str]:
     required = {"draft_listed", "draft_read", "memory_searched", "slack_sent", "processed"}
     seen = {event.get("type") for event in events}
     blockers = [f"missing audit event: {event}" for event in sorted(required - seen)]
+    processed_statuses = {
+        event.get("status")
+        for event in events
+        if event.get("type") == "processed" and event.get("driver") == "openclaw"
+    }
+    if "sent" not in processed_statuses:
+        blockers.append("missing success processed proof")
+    if "skipped_no_relevant_memory" not in processed_statuses:
+        blockers.append("missing silent-case processed proof")
+    if not any(
+        event.get("type") == "slack_sent"
+        and event.get("driver") == "openclaw"
+        and event.get("status") == "sent"
+        for event in events
+    ):
+        blockers.append("missing sent Slack proof")
     for event in events:
         if event.get("type") in required and event.get("driver") != "openclaw":
             blockers.append(f"non-openclaw proof for {event.get('type')}: {event.get('driver')}")
@@ -41,12 +69,18 @@ def audit_blockers() -> list[str]:
             words = query.split()
             if not (2 <= len(words) <= 6):
                 blockers.append(f"query not focused 2-6 words: {query}")
+            normalized_words = {word.strip(".,:;!?()[]{}").lower() for word in words}
+            if normalized_words and normalized_words <= GENERIC_QUERY_WORDS:
+                blockers.append(f"generic search query: {query}")
+            if len(words) >= 25 or len(query) >= 180:
+                blockers.append(f"full-draft-style search query: {query[:120]}")
     return blockers
 
 
 def main() -> int:
     checks = [
         run(["uv", "run", "pytest", "-q"]),
+        run(["uv", "run", "python", "scripts/cosine_sanity.py"]),
         run(["uv", "run", "python", "scripts/nemoclaw_scaffold_check.py"]),
         run(["uv", "run", "python", "scripts/dgx_check.py"]),
     ]
