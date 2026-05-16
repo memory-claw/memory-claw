@@ -46,9 +46,19 @@ chmod 600 .env
 
 | Token | Where | Steps |
 |-------|-------|-------|
-| `SLACK_BOT_TOKEN` | [api.slack.com/apps](https://api.slack.com/apps) → Your App → **OAuth & Permissions** → Bot User OAuth Token | Starts with `xoxb-`. Needs scopes: `chat:write`, `channels:history`, `channels:read` |
+| `SLACK_BOT_TOKEN` | [api.slack.com/apps](https://api.slack.com/apps) → Your App → **OAuth & Permissions** → Bot User OAuth Token | Starts with `xoxb-`. Needs scopes: `chat:write`, `channels:history`, `channels:read`, `app_mentions:read` |
 | `SLACK_APP_TOKEN` | [api.slack.com/apps](https://api.slack.com/apps) → Your App → **Basic Information** → App-Level Tokens → Generate Token | Starts with `xapp-`. Needs scope: `connections:write` (for Socket Mode) |
 | `SLACK_CHANNEL` | Name of the Slack channel the bot posts to | e.g. `#institutional-memory`. Bot must be invited to this channel |
+
+### New app from scratch (interactive token paste on ASUS)
+
+After completing the browser steps below, on ASUS run:
+
+```bash
+cd ~/memory-claw
+~/.local/bin/uv run python scripts/prompt_slack_tokens.py
+~/.local/bin/uv run python scripts/slack_setup_verify.py
+```
 
 ### If no Slack app exists yet
 
@@ -56,9 +66,17 @@ chmod 600 .env
 2. Name it (e.g. "Institutional Memory") and pick the workspace
 3. **Socket Mode** → Enable Socket Mode → generate app-level token with `connections:write` → that's your `SLACK_APP_TOKEN`
 4. **OAuth & Permissions** → add bot scopes: `chat:write`, `channels:history`, `channels:read`
-5. **Event Subscriptions** → Enable Events → Subscribe to bot events: `message.channels`
+5. **Event Subscriptions** → Enable Events → Subscribe to bot events: `message.channels`, `app_mention`
 6. **Install to Workspace** → copy the Bot User OAuth Token → that's your `SLACK_BOT_TOKEN`
 7. Invite the bot to the channel: `/invite @Institutional Memory` in Slack
+
+Optional `.env` vars for the answer loop (see `.env.example`):
+
+```text
+LISTENER_CHANNELS=#institutional-memory
+UNPROMPTED_THRESHOLD=0.80
+THREAD_THRESHOLD=0.65
+```
 
 ## Step 5: Verify Ollama Is Running
 
@@ -99,15 +117,29 @@ All tests should pass.
 
 Check the Slack channel for the message.
 
-## Step 9: Start the Slack Listener (Optional)
+## Step 8b: Ingest Corpus (Required for Search Replies)
 
-Only needed if live Slack ingestion is desired:
+```bash
+~/.local/bin/uv run python scripts/ingest_corpus.py --force
+```
+
+Without this, the listener and OpenClaw search return no hits.
+
+## Step 9: Start the Slack Listener
 
 ```bash
 ~/.local/bin/uv run python scripts/slack_listener.py
 ```
 
-Requires both `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` to be set. The listener stays running and ingests new messages into `company/inbox/slack/`.
+Requires both `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` to be set (not placeholders).
+
+The listener ingests messages into `company/inbox/slack/` and runs the answer loop (search + in-thread replies on @mention).
+
+Verify Slack tokens:
+
+```bash
+~/.local/bin/uv run python scripts/dgx_check.py --skip-backup-video --check-slack-ingestion
+```
 
 ## Important Warnings
 
