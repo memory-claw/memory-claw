@@ -34,4 +34,6 @@ jobs:
           ASUS_TAILSCALE_IP: 100.68.221.47
           ASUS_USER_HOST: asus@100.68.221.47
           ASUS_BRANCH: ${{ github.ref_name }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ vars.SLACK_CHANNEL }}
         run: scripts/deploy_asus.sh

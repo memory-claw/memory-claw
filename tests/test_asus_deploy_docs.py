@@ -18,6 +18,10 @@ def test_deploy_script_uses_tailscale_and_ssh_key_without_password():
     assert "cp SOUL.md" in script
     assert "cp HEARTBEAT.md" in script
     assert "cp skills/institutional-memory/SKILL.md" in script
+    assert "SLACK_BOT_TOKEN" in script
+    assert "SLACK_CHANNEL" in script
+    assert "cat > .env" in script
+    assert "umask 077" in script
     assert "uv sync" in script
     assert "scripts/dgx_check.py --skip-model-smoke --skip-backup-video" in script
     assert "sshpass" not in script
@@ -32,6 +36,8 @@ def test_github_action_deploys_over_tailscale_without_password():
     assert "codex/institutional-memory-engine" in workflow
     assert "100.68.221.47" in workflow
     assert "ASUS_SSH_KEY" in workflow
+    assert "secrets.SLACK_BOT_TOKEN" in workflow
+    assert "vars.SLACK_CHANNEL" in workflow
     assert "scripts/deploy_asus.sh" in workflow
     assert "sshpass" not in workflow
     assert "password" not in workflow.lower()
