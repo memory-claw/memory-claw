@@ -10,6 +10,21 @@
 
 ---
 
+## Split Branch Plans
+
+For three-person implementation, use these smaller branch plans instead of
+assigning the full plan to one branch:
+
+- `docs/superpowers/plans/2026-05-16-slack-ingestion-1-foundation.md`
+  - branch: `codex/slack-ingestion-foundation`
+  - merge first
+- `docs/superpowers/plans/2026-05-16-slack-ingestion-2-sync-cli.md`
+  - branch: `codex/slack-ingestion-sync-cli`
+  - base it on the foundation branch; merge second
+- `docs/superpowers/plans/2026-05-16-slack-ingestion-3-listener-docs.md`
+  - branch: `codex/slack-ingestion-listener-docs`
+  - base it on the sync/CLI branch; merge third
+
 ## File Structure
 
 - Create `institutional_memory/slack_ingest.py`: Slack thread models, filename generation, markdown rendering, bot filtering, Slack WebClient history/reply fetch, write-to-inbox/corpus helpers, promotion helper.
