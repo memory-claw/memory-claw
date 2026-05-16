@@ -7,6 +7,7 @@ Run outside OpenClaw:
 from __future__ import annotations
 
 import json
+import signal
 import sys
 from threading import Event
 
@@ -16,19 +17,55 @@ from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 
 from institutional_memory.audit import log_event
-from institutional_memory.config import SLACK_APP_TOKEN, SLACK_BOT_TOKEN
+from institutional_memory.config import (
+    LISTENER_CHANNELS,
+    SLACK_APP_TOKEN,
+    SLACK_BOT_TOKEN,
+    SLACK_CHANNEL,
+)
+from institutional_memory.listener import (
+    DedupeSet,
+    ListenerState,
+    handle_listener_event,
+    resolve_channels,
+)
 from institutional_memory.slack_ingest import handle_message_event
 
 
-def process(client: SocketModeClient, request: SocketModeRequest) -> None:
+def _build_state(web_client: WebClient) -> ListenerState:
+    auth = web_client.auth_test()
+    bot_user_id = auth["user_id"]
+
+    allowed_channels = resolve_channels(
+        LISTENER_CHANNELS, fallback_channel=SLACK_CHANNEL, client=web_client
+    )
+
+    return ListenerState(
+        bot_user_id=bot_user_id,
+        allowed_channels=allowed_channels,
+        dedupe=DedupeSet(),
+    )
+
+
+def process(
+    client: SocketModeClient,
+    request: SocketModeRequest,
+    web_client: WebClient,
+    state: ListenerState,
+) -> None:
     if request.type == "events_api":
         client.send_socket_mode_response(SocketModeResponse(envelope_id=request.envelope_id))
         event = request.payload.get("event", {})
+
+        # Existing ingestion (write to inbox)
         try:
-            result = handle_message_event(event, client=WebClient(token=SLACK_BOT_TOKEN))
+            ingest_result = handle_message_event(event, client=web_client)
         except Exception as exc:
-            result = {"status": "error", "error": str(exc)}
-        log_event("slack_event_ingested", **result)
+            ingest_result = {"status": "error", "error": str(exc)}
+        log_event("slack_event_ingested", **ingest_result)
+
+        # Answer loop (search + reply)
+        result = handle_listener_event(event, web_client, state)
         print(json.dumps(result, ensure_ascii=False), flush=True)
 
 
@@ -39,11 +76,38 @@ def main() -> int:
     if not SLACK_BOT_TOKEN:
         print(json.dumps({"status": "error", "error": "SLACK_BOT_TOKEN missing"}), file=sys.stderr)
         return 1
-    client = SocketModeClient(app_token=SLACK_APP_TOKEN, web_client=WebClient(token=SLACK_BOT_TOKEN))
-    client.socket_mode_request_listeners.append(process)
-    client.connect()
-    print(json.dumps({"status": "listening"}), flush=True)
-    Event().wait()
+
+    web_client = WebClient(token=SLACK_BOT_TOKEN)
+    state = _build_state(web_client)
+
+    log_event("listener_started", bot_user_id=state.bot_user_id, channels=sorted(state.allowed_channels))
+    print(
+        json.dumps({
+            "status": "listening",
+            "bot_user_id": state.bot_user_id,
+            "channels": sorted(state.allowed_channels),
+        }),
+        flush=True,
+    )
+
+    sm_client = SocketModeClient(app_token=SLACK_APP_TOKEN, web_client=web_client)
+    sm_client.socket_mode_request_listeners.append(
+        lambda client, request: process(client, request, web_client, state)
+    )
+
+    stop = Event()
+
+    def _shutdown(signum, frame):
+        log_event("listener_stopped")
+        print(json.dumps({"status": "stopped"}), flush=True)
+        stop.set()
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    sm_client.connect()
+    stop.wait()
+    sm_client.disconnect()
     return 0
 
 
