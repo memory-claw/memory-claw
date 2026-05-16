@@ -35,3 +35,32 @@ uv run python scripts/final_gate.py
 ```
 
 Do not call the goal complete until that command passes on ASUS.
+
+## Push Deploy
+
+Use SSH key auth over Tailscale. Do not store the ASUS login password in this
+repo or in a workflow. Push deploy is defined in
+`.github/workflows/deploy-asus.yml`.
+
+GitHub secrets required:
+
+```bash
+ASUS_SSH_KEY          # private deploy key that can SSH to asus@100.68.221.47
+TS_OAUTH_CLIENT_ID    # Tailscale OAuth client id
+TS_OAUTH_SECRET       # Tailscale OAuth secret
+```
+
+One-time ASUS SSH key setup from this Mac:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/asus_deploy
+ssh-copy-id -i ~/.ssh/asus_deploy.pub asus@100.68.221.47
+tailscale ping 100.68.221.47
+ASUS_SSH_KEY=~/.ssh/asus_deploy scripts/deploy_asus.sh
+```
+
+Each push to `codex/institutional-memory-engine` runs `scripts/deploy_asus.sh`
+from GitHub Actions over Tailscale. The script fetches that branch on ASUS and
+checks it out over the old `main` checkout. Override `ASUS_USER_HOST`,
+`ASUS_TAILSCALE_IP`, `ASUS_REPO`, `ASUS_BRANCH`, or `ASUS_SSH_KEY` for manual
+runs if the ASUS checkout differs from `~/memory-claw`.

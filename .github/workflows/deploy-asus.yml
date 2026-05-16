@@ -1,0 +1,35 @@
+name: Deploy ASUS
+
+on:
+  push:
+    branches:
+      - codex/institutional-memory-engine
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Configure SSH key
+        env:
+          ASUS_SSH_KEY: ${{ secrets.ASUS_SSH_KEY }}
+        run: |
+          set -eu
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$ASUS_SSH_KEY" > ~/.ssh/asus_deploy
+          chmod 600 ~/.ssh/asus_deploy
+
+      - name: Deploy to ASUS
+        env:
+          ASUS_SSH_KEY: /home/runner/.ssh/asus_deploy
+          ASUS_TAILSCALE_IP: 100.68.221.47
+          ASUS_USER_HOST: asus@100.68.221.47
+        run: scripts/deploy_asus.sh
