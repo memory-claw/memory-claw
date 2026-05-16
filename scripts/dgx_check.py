@@ -83,8 +83,9 @@ def backup_video_blockers(path: Path = DEMO_ARTIFACTS_PATH) -> list[str]:
 
 
 def slack_secret_blockers(token: str | None = None, channel: str | None = None) -> list[str]:
-    token = token if token is not None else os.getenv("SLACK_BOT_TOKEN")
-    channel = channel if channel is not None else os.getenv("SLACK_CHANNEL")
+    if token is None and channel is None:
+        token = os.getenv("SLACK_BOT_TOKEN")
+        channel = os.getenv("SLACK_CHANNEL")
     blockers: list[str] = []
     if not token:
         blockers.append("SLACK_BOT_TOKEN missing")
