@@ -22,10 +22,18 @@ from institutional_memory.config import (
 EXAMPLE_SLACK_TOKEN = "xoxb-your-token-here"
 
 
+def _resolve_uv() -> str:
+    import shutil
+    return shutil.which("uv") or os.path.expanduser("~/.local/bin/uv")
+
+
 def run(*command: str, timeout: int = 120) -> tuple[int, str]:
+    resolved = list(command)
+    if resolved and resolved[0] == "uv":
+        resolved[0] = _resolve_uv()
     try:
         result = subprocess.run(
-            command,
+            resolved,
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
