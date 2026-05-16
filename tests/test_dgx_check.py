@@ -38,3 +38,13 @@ def test_backup_video_check_rejects_empty_placeholder(tmp_path):
     (tmp_path / "real.mp4").write_bytes(b"video bytes")
 
     assert dgx_check.backup_video_blockers(tmp_path) == []
+
+
+def test_slack_secret_check_rejects_example_token():
+    assert dgx_check.slack_secret_blockers("xoxb-your-token-here", "#institutional-memory") == [
+        "SLACK_BOT_TOKEN is still the .env.example placeholder"
+    ]
+
+
+def test_slack_secret_check_accepts_configured_values():
+    assert dgx_check.slack_secret_blockers("xoxb-real-looking-token", "#institutional-memory") == []

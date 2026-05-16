@@ -19,6 +19,8 @@ from institutional_memory.config import (
     SLACK_CHANNEL,
 )
 
+EXAMPLE_SLACK_TOKEN = "xoxb-your-token-here"
+
 
 def run(*command: str, timeout: int = 120) -> tuple[int, str]:
     try:
@@ -80,6 +82,17 @@ def backup_video_blockers(path: Path = DEMO_ARTIFACTS_PATH) -> list[str]:
     return [f"backup video is empty: {empty}"]
 
 
+def slack_secret_blockers(token: str | None = SLACK_BOT_TOKEN, channel: str | None = SLACK_CHANNEL) -> list[str]:
+    blockers: list[str] = []
+    if not token:
+        blockers.append("SLACK_BOT_TOKEN missing")
+    elif token == EXAMPLE_SLACK_TOKEN:
+        blockers.append("SLACK_BOT_TOKEN is still the .env.example placeholder")
+    if not channel:
+        blockers.append("SLACK_CHANNEL missing")
+    return blockers
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="DGX/ASUS readiness check")
     parser.add_argument("--skip-model-smoke", action="store_true")
@@ -91,10 +104,7 @@ def main() -> int:
     if code != 0:
         blockers.append(f"pytest failed: {output[-1000:]}")
 
-    if not SLACK_BOT_TOKEN:
-        blockers.append("SLACK_BOT_TOKEN missing")
-    if not SLACK_CHANNEL:
-        blockers.append("SLACK_CHANNEL missing")
+    blockers.extend(slack_secret_blockers())
 
     if not args.skip_model_smoke:
         ok, message = model_smoke()
