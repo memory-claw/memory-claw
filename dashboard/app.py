@@ -329,6 +329,25 @@ def _slack_sent_count() -> int:
     return sum(1 for e in _parse_audit_objects() if e.get("type") == "slack_sent")
 
 
+def _listener_skip_stats(minutes: int = 60) -> dict[str, int]:
+    cutoff = datetime.now(timezone.utc).timestamp() - (minutes * 60)
+    counts: dict[str, int] = {}
+    for event in _parse_audit_objects():
+        if event.get("type") != "listener_skip":
+            continue
+        ts = event.get("ts")
+        if ts:
+            try:
+                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                if dt.timestamp() < cutoff:
+                    continue
+            except (TypeError, ValueError):
+                pass
+        reason = str(event.get("reason") or "unknown")
+        counts[reason] = counts.get(reason, 0) + 1
+    return counts
+
+
 def _infer_tag(rel_path: str) -> str:
     lower = rel_path.lower()
     if "policy" in lower:
@@ -508,15 +527,19 @@ def api_status() -> dict[str, Any]:
 
 
 @app.get("/api/stats")
-def api_stats() -> dict[str, int]:
+def api_stats() -> dict[str, Any]:
     new_set = set(list_new_drafts())
     all_paths = [_rel_inbox_path(p) for p in _iter_inbox_paths()]
+    skip_stats = _listener_skip_stats()
     return {
         "corpus_docs": _count_corpus_docs(),
         "inbox_total": len(all_paths),
         "inbox_unprocessed": len(new_set),
         "vector_chunks": _vector_chunks(),
         "slack_sent": _slack_sent_count(),
+        "listener_skip_below_threshold": skip_stats.get("below_threshold", 0),
+        "listener_skip_not_in_allowlist": skip_stats.get("not_in_allowlist", 0),
+        "listener_skip_total": sum(skip_stats.values()),
     }
 
 

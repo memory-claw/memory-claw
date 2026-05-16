@@ -18,33 +18,32 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 
 from institutional_memory.audit import log_event
 from institutional_memory.config import (
+    LISTENER_CHANNEL_THRESHOLDS,
     LISTENER_CHANNELS,
     SLACK_APP_TOKEN,
     SLACK_BOT_TOKEN,
     SLACK_CHANNEL,
 )
-from institutional_memory.listener import (
-    DedupeSet,
-    ListenerState,
-    handle_listener_event,
-    resolve_channels,
-)
+from institutional_memory.listener import build_listener_state, handle_listener_event
+from institutional_memory.openclaw_wake import maybe_wake_openclaw
 from institutional_memory.slack_ingest import handle_message_event
 
 
-def _build_state(web_client: WebClient) -> ListenerState:
+def _build_state(web_client: WebClient):
     auth = web_client.auth_test()
-    bot_user_id = auth["user_id"]
-
-    allowed_channels = resolve_channels(
-        LISTENER_CHANNELS, fallback_channel=SLACK_CHANNEL, client=web_client
+    return build_listener_state(
+        bot_user_id=auth["user_id"],
+        listener_channels=LISTENER_CHANNELS,
+        fallback_channel=SLACK_CHANNEL,
+        client=web_client,
+        channel_thresholds_raw=LISTENER_CHANNEL_THRESHOLDS,
     )
 
-    return ListenerState(
-        bot_user_id=bot_user_id,
-        allowed_channels=allowed_channels,
-        dedupe=DedupeSet(),
-    )
+
+def _channels_for_log(state) -> str | list[str]:
+    if state.allow_all_channels:
+        return "all"
+    return sorted(state.allowed_channels)
 
 
 def process(
@@ -63,6 +62,7 @@ def process(
         except Exception as exc:
             ingest_result = {"status": "error", "error": str(exc)}
         log_event("slack_event_ingested", **ingest_result)
+        maybe_wake_openclaw(ingest_result)
 
         # Answer loop (search + reply)
         result = handle_listener_event(event, web_client, state)
@@ -92,12 +92,13 @@ def main() -> int:
     web_client = WebClient(token=SLACK_BOT_TOKEN)
     state = _build_state(web_client)
 
-    log_event("listener_started", bot_user_id=state.bot_user_id, channels=sorted(state.allowed_channels))
+    channels = _channels_for_log(state)
+    log_event("listener_started", bot_user_id=state.bot_user_id, channels=channels)
     print(
         json.dumps({
             "status": "listening",
             "bot_user_id": state.bot_user_id,
-            "channels": sorted(state.allowed_channels),
+            "channels": channels,
         }),
         flush=True,
     )

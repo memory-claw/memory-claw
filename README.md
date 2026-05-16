@@ -166,13 +166,32 @@ memory passes the relevance threshold.
 
 ## Slack Behavior
 
+Two paths share Chroma search but differ on triggers:
+
+| Path | Trigger | Reply channel |
+|------|---------|---------------|
+| **Listener** (`scripts/slack_listener.py`) | Live Slack events | Same channel as the message (in-thread) |
+| **OpenClaw** (`HEARTBEAT.md` + SOUL) | New files under `company/inbox/` | `SLACK_CHANNEL`, or draft `slack_channel_id` / `slack_thread_ts` when set |
+
 `SLACK_BOT_TOKEN` lets `./bin/imem send-slack` post OpenClaw's final
-memory-backed answer into `SLACK_CHANNEL`.
+memory-backed answer. For Slack-ingested inbox threads, SOUL passes
+`--channel` and `--thread-ts` from draft metadata so replies land in the
+original thread.
+
+Listener env (see `.env.example`):
+
+- `LISTENER_CHANNELS=*` — unprompted replies in any channel the bot is in
+- `UNPROMPTED_THRESHOLD` — default `0.80`; use `0.65` for demos
+- `LISTENER_CHANNEL_THRESHOLDS` — optional per-channel overrides
+- `OPENCLAW_WAKE_CMD` — optional shell hook after listener writes inbox files
 
 The bot should not post raw ingested Slack messages. It posts only when an
 active inbox draft/thread matches useful institutional memory from `company/corpus/`.
 The message should summarize the relevant context and include source
 attribution, for example `company/corpus/2023_rfp_postmortem.txt`.
+
+**@mentions** work in any channel the bot is invited to. **Unprompted** replies
+require `LISTENER_CHANNELS=*` or an explicit channel list, plus a strong corpus match.
 
 Slack ingestion uses Slack as an input source:
 

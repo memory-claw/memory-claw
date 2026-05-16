@@ -5,9 +5,11 @@ from institutional_memory.listener import (
     DedupeSet,
     ListenerState,
     build_search_query,
+    effective_threshold,
     format_no_hits_reply,
     format_reply,
     handle_listener_event,
+    resolve_channel_thresholds,
     resolve_channels,
     select_threshold,
     should_skip,
@@ -107,7 +109,8 @@ class FakeWebClient:
 def test_resolve_channels_passes_through_ids():
     client = FakeWebClient([])
     result = resolve_channels("C123,C456", fallback_channel="#general", client=client)
-    assert result == {"C123", "C456"}
+    assert result.channel_ids == frozenset({"C123", "C456"})
+    assert result.allow_all_channels is False
 
 
 def test_resolve_channels_converts_names_to_ids():
@@ -116,7 +119,7 @@ def test_resolve_channels_converts_names_to_ids():
         {"id": "C456", "name": "random"},
     ])
     result = resolve_channels("#general,#random", fallback_channel="", client=client)
-    assert result == {"C123", "C456"}
+    assert result.channel_ids == frozenset({"C123", "C456"})
 
 
 def test_resolve_channels_mixed_names_and_ids():
@@ -124,7 +127,7 @@ def test_resolve_channels_mixed_names_and_ids():
         {"id": "C123", "name": "general"},
     ])
     result = resolve_channels("C456,#general", fallback_channel="", client=client)
-    assert result == {"C123", "C456"}
+    assert result.channel_ids == frozenset({"C123", "C456"})
 
 
 def test_resolve_channels_empty_uses_fallback():
@@ -132,13 +135,29 @@ def test_resolve_channels_empty_uses_fallback():
         {"id": "C789", "name": "institutional-memory"},
     ])
     result = resolve_channels("", fallback_channel="#institutional-memory", client=client)
-    assert result == {"C789"}
+    assert result.channel_ids == frozenset({"C789"})
 
 
 def test_resolve_channels_fallback_is_id():
     client = FakeWebClient([])
     result = resolve_channels("", fallback_channel="C789", client=client)
-    assert result == {"C789"}
+    assert result.channel_ids == frozenset({"C789"})
+
+
+def test_resolve_channels_wildcard():
+    client = FakeWebClient([])
+    result = resolve_channels("*", fallback_channel="#general", client=client)
+    assert result.allow_all_channels is True
+    assert result.channel_ids == frozenset()
+
+
+def test_resolve_channels_wildcard_mixed_raises():
+    client = FakeWebClient([])
+    try:
+        resolve_channels("*,#general", fallback_channel="", client=client)
+        assert False, "should have raised"
+    except ValueError as exc:
+        assert "*" in str(exc)
 
 
 def test_resolve_channels_unresolved_name_raises():
@@ -150,6 +169,23 @@ def test_resolve_channels_unresolved_name_raises():
         assert False, "should have raised"
     except ValueError as exc:
         assert "nonexistent" in str(exc)
+
+
+def test_resolve_channel_thresholds_by_id():
+    client = FakeWebClient([])
+    result = resolve_channel_thresholds("C123:0.85,C456:0.70", client)
+    assert result == {"C123": 0.85, "C456": 0.70}
+
+
+def test_effective_threshold_uses_per_channel_override():
+    state = ListenerState(
+        bot_user_id="UBOT",
+        allowed_channels=set(),
+        dedupe=DedupeSet(),
+        channel_thresholds={"C100": 0.85},
+    )
+    assert effective_threshold(state, "C100", is_mention=False, is_active_thread=False) == 0.85
+    assert effective_threshold(state, "C200", is_mention=False, is_active_thread=False) == 0.80
 
 
 # --- Task 3: Query building ---
@@ -363,6 +399,21 @@ def test_handle_non_allowed_channel_no_mention_skipped():
     assert result["status"] == "skipped"
     assert result["reason"] == "not_in_allowlist"
     assert len(client.posted) == 0
+
+
+def test_handle_allow_all_channels_unprompted():
+    state = _make_state(allowed_channels=set())
+    state.allow_all_channels = True
+    client = MockWebClient()
+    event = {"type": "message", "channel": "C999", "ts": "1.0", "user": "U123", "text": "What was our Q3 strategy?"}
+
+    hits = [{"score": 0.85, "text": "Strategy", "source": "strat.md"}]
+    with patch("institutional_memory.listener.search_memory", return_value=hits):
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert len(client.posted) == 1
 
 
 def test_handle_active_thread_uses_lower_threshold():

@@ -67,6 +67,17 @@ def compose_message(draft: dict, hits: list[dict], timeout_seconds: int) -> str:
     return result["message"]
 
 
+def send_slack_argv(draft: dict) -> list[str]:
+    args = ["send-slack", "--message-file", ".runtime/slack_message.txt"]
+    channel_id = draft.get("slack_channel_id")
+    thread_ts = draft.get("slack_thread_ts")
+    if channel_id:
+        args.extend(["--channel", channel_id])
+    if thread_ts:
+        args.extend(["--thread-ts", thread_ts])
+    return args
+
+
 def fallback_message(hits: list[dict]) -> str:
     hit = hits[0]
     return (
@@ -127,7 +138,7 @@ def main() -> int:
         print(json.dumps(status, ensure_ascii=False))
         return 0
 
-    status = run_imem("send-slack", "--message-file", ".runtime/slack_message.txt")
+    status = run_imem(*send_slack_argv(draft))
     final_status = "sent" if isinstance(status, dict) and status.get("status") in {"sent", "dry_run"} else "slack_failed"
     run_imem(
         "mark-processed",
