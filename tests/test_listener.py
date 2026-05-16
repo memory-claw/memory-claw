@@ -499,7 +499,7 @@ def test_handle_bot_message_skipped():
 # --- Group channel (channel_type) tests ---
 
 
-def test_group_channel_without_mention_skipped():
+def test_group_channel_without_mention_uses_unprompted_threshold():
     state = _make_state(allowed_channels={"C100"})
     client = MockWebClient()
     event = {
@@ -511,12 +511,13 @@ def test_group_channel_without_mention_skipped():
         "text": "What was our Q3 strategy?",
     }
 
-    with patch("institutional_memory.listener.log_event"):
-        result = handle_listener_event(event, client, state)
+    with patch("institutional_memory.listener.search_memory", return_value=[]) as mock_search:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
 
     assert result["status"] == "skipped"
-    assert result["reason"] == "not_mentioned_in_channel"
-    assert len(client.posted) == 0
+    assert result["reason"] == "below_threshold"
+    mock_search.assert_called_once()
 
 
 def test_group_channel_with_mention_replies():
@@ -540,7 +541,7 @@ def test_group_channel_with_mention_replies():
     assert len(client.posted) == 1
 
 
-def test_private_group_channel_without_mention_skipped():
+def test_private_group_channel_without_mention_uses_unprompted_threshold():
     state = _make_state(allowed_channels={"C100"})
     client = MockWebClient()
     event = {
@@ -552,11 +553,13 @@ def test_private_group_channel_without_mention_skipped():
         "text": "What was our Q3 strategy?",
     }
 
-    with patch("institutional_memory.listener.log_event"):
-        result = handle_listener_event(event, client, state)
+    with patch("institutional_memory.listener.search_memory", return_value=[]) as mock_search:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
 
     assert result["status"] == "skipped"
-    assert result["reason"] == "not_mentioned_in_channel"
+    assert result["reason"] == "below_threshold"
+    mock_search.assert_called_once()
 
 
 def test_group_channel_mention_bypasses_allowlist():
