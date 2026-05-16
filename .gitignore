@@ -1,0 +1,16 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.egg-info/
+dist/
+chroma_db/
+.runtime/*
+!.runtime/.gitkeep
+audit_log.jsonl
+processed_drafts.json
+ingested_files.json
+demo_artifacts/*
+!demo_artifacts/.gitkeep
+.worktrees/

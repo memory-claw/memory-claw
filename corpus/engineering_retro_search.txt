@@ -1,0 +1,3 @@
+Engineering Retro Search
+
+The search infrastructure incident came from a slow reindex job and missing queue visibility. The team added dashboards, better backoff, and a runbook for manual index rebuilds.
