@@ -33,3 +33,18 @@ def test_safe_runtime_allows_runtime_file():
 def test_safe_runtime_blocks_inbox_file():
     with pytest.raises(PathNotAllowedError):
         safe_runtime_path("company/inbox/foo.txt")
+
+
+def test_safe_corpus_allows_markdown_under_slack_corpus():
+    from institutional_memory.paths import safe_corpus_path
+
+    assert safe_corpus_path("company/corpus/slack/C123_1710000000.000000.md") == (
+        PROJECT_ROOT / "company/corpus/slack/C123_1710000000.000000.md"
+    ).resolve()
+
+
+def test_safe_corpus_blocks_traversal():
+    from institutional_memory.paths import safe_corpus_path
+
+    with pytest.raises(PathNotAllowedError):
+        safe_corpus_path("company/corpus/../../.env")

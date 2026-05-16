@@ -22,6 +22,15 @@ def test_source_attributions_ignore_missing_source_filename():
     assert slack.source_attributions("Review prior bid notes before sending.") == []
 
 
+def test_source_attributions_find_nested_slack_corpus_sources():
+    text = "See company/corpus/slack/C123_1710000000.000000.md and company/corpus/mock_data/postmortems/source.md."
+
+    assert slack.source_attributions(text) == [
+        "company/corpus/mock_data/postmortems/source.md",
+        "company/corpus/slack/C123_1710000000.000000.md",
+    ]
+
+
 def test_send_slack_reports_bot_token_api_error_without_webhook(monkeypatch):
     class FakeClient:
         def __init__(self, token):

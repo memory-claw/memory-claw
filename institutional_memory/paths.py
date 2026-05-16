@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from institutional_memory.config import COMPANY_INBOX_PATH, PROJECT_ROOT, RUNTIME_PATH
+from institutional_memory.config import COMPANY_CORPUS_PATH, COMPANY_INBOX_PATH, PROJECT_ROOT, RUNTIME_PATH
 
 
 class PathNotAllowedError(ValueError):
@@ -31,6 +31,13 @@ def safe_inbox_path(raw: str) -> Path:
     candidate = _ensure_under(_resolve_under_project(raw), COMPANY_INBOX_PATH, raw)
     if candidate.suffix.lower() not in {".txt", ".md", ".pdf"}:
         raise PathNotAllowedError("Only .txt, .md, and .pdf files are allowed")
+    return candidate
+
+
+def safe_corpus_path(raw: str) -> Path:
+    candidate = _ensure_under(_resolve_under_project(raw), COMPANY_CORPUS_PATH, raw)
+    if candidate.suffix.lower() not in {".txt", ".md", ".pdf"}:
+        raise PathNotAllowedError("Only .txt, .md, and .pdf corpus files are allowed")
     return candidate
 
 

@@ -31,6 +31,7 @@ INGESTED_REGISTRY = PROJECT_ROOT / "ingested_files.json"
 AUDIT_LOG = PROJECT_ROOT / "audit_log.jsonl"
 DEMO_ARTIFACTS_PATH = PROJECT_ROOT / "demo_artifacts"
 
+SLACK_APP_TOKEN = os.getenv("SLACK_APP_TOKEN")
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 SLACK_CHANNEL = os.getenv("SLACK_CHANNEL", "#institutional-memory")
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
