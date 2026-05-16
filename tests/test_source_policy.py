@@ -103,6 +103,11 @@ def test_render_excerpt_and_full_for_share(tmp_path, monkeypatch):
     source.write_text("full source text", encoding="utf-8")
     monkeypatch.setattr(config, "PROJECT_ROOT", project_root)
     monkeypatch.setattr(source_policy, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(
+        source_policy,
+        "load_source_policy",
+        lambda: SourcePolicy(rules=[("company/corpus/share.md", "share")]),
+    )
 
     refs = [{"source": "company/corpus/share.md", "access": "share", "text": "excerpt text"}]
 
@@ -116,9 +121,38 @@ def test_render_excerpt_and_full_for_share(tmp_path, monkeypatch):
     }
 
 
-def test_render_refuses_cite_only_and_invalid_index():
+def test_render_refuses_cite_only_and_invalid_index(monkeypatch):
+    import institutional_memory.source_policy as source_policy
+
+    monkeypatch.setattr(
+        source_policy,
+        "load_source_policy",
+        lambda: SourcePolicy(rules=[("company/corpus/cite.md", "cite_only")]),
+    )
     refs = [{"source": "company/corpus/cite.md", "access": "cite_only", "text": ""}]
 
     assert render_source_command(SourceCommand(kind="excerpt", index=1), refs)["status"] == "refused"
     assert render_source_command(SourceCommand(kind="full", index=1), refs)["status"] == "refused"
     assert render_source_command(SourceCommand(kind="excerpt", index=2), refs)["status"] == "missing"
+
+
+def test_render_rechecks_policy_for_stale_or_mislabelled_refs(monkeypatch):
+    import institutional_memory.source_policy as source_policy
+
+    monkeypatch.setattr(
+        source_policy,
+        "load_source_policy",
+        lambda: SourcePolicy(rules=[("company/corpus/restricted.md", "restricted")]),
+    )
+    refs = [
+        {
+            "source": "company/corpus/restricted.md",
+            "access": "share",
+            "text": "stale text that should not display",
+        }
+    ]
+
+    rendered = render_source_command(SourceCommand(kind="excerpt", index=1), refs)
+
+    assert rendered["status"] == "missing"
+    assert "stale text" not in rendered["text"]

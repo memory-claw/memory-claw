@@ -43,6 +43,8 @@ def load_source_policy(path: Path = SOURCE_POLICY_PATH) -> SourcePolicy:
         return SourcePolicy()
 
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise ValueError("source policy must be a mapping")
     default = _validate_access(data.get("default", "restricted"))
     rules = [_validate_rule(rule) for rule in data.get("rules", []) or []]
     return SourcePolicy(default=default, rules=rules)
@@ -89,7 +91,7 @@ def render_source_command(command: SourceCommand, refs: list[dict[str, Any]]) ->
     ref = refs[ref_index]
     source = str(ref.get("source", ""))
     name = display_name(source)
-    access = ref.get("access", "restricted")
+    access = load_source_policy().access_for(source)
     if access == "restricted":
         return {
             "status": "missing",
