@@ -431,10 +431,15 @@
     }
 
     function renderStats(data) {
+      const skipSub =
+        data.listener_skip_total > 0
+          ? `${data.listener_skip_below_threshold || 0} below threshold, ${data.listener_skip_not_in_allowlist || 0} not allowlisted (60m)`
+          : "no listener_skip in last 60m";
       const cards = [
         { label: "Corpus docs", value: data.corpus_docs, sub: "company/corpus/" },
         { label: "Inbox queue", value: data.inbox_unprocessed, sub: `${data.inbox_total} total in inbox` },
         { label: "Slack sent", value: data.slack_sent, sub: "audit_log.jsonl slack_sent" },
+        { label: "Listener skips", value: data.listener_skip_total ?? 0, sub: skipSub },
         { label: "Vector chunks", value: data.vector_chunks, sub: "chroma_db / org_memory" },
       ];
       document.getElementById("stats").innerHTML = cards

@@ -12,23 +12,21 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from institutional_memory.config import SLACK_CHANNEL
-from institutional_memory.listener import DedupeSet, ListenerState, handle_listener_event, resolve_channels
+from institutional_memory.config import (
+    LISTENER_CHANNEL_THRESHOLDS,
+    LISTENER_CHANNELS,
+    SLACK_BOT_TOKEN,
+    SLACK_CHANNEL,
+)
+from institutional_memory.listener import build_listener_state, handle_listener_event
 from slack_sdk import WebClient
-
-from institutional_memory.config import SLACK_BOT_TOKEN
 
 CHANNEL = "C0B3SJEERBR"
 BOT_ID = "U0B5204MF3J"
 
 
-def _run_case(case_id: str, event: dict, expect: str) -> dict:
+def _run_case(case_id: str, event: dict, expect: str, state) -> dict:
     client = MagicMock(spec=WebClient)
-    state = ListenerState(
-        bot_user_id=BOT_ID,
-        allowed_channels={CHANNEL},
-        dedupe=DedupeSet(),
-    )
     result = handle_listener_event(event, client, state)
     ok = result.get("status") == expect
     return {"id": case_id, "ok": ok, "expect": expect, "result": result}
@@ -40,8 +38,17 @@ def main() -> int:
         return 1
 
     web = WebClient(token=SLACK_BOT_TOKEN)
-    allowed = resolve_channels("", fallback_channel=SLACK_CHANNEL, client=web)
-    channel = next(iter(allowed), CHANNEL)
+    state = build_listener_state(
+        bot_user_id=BOT_ID,
+        listener_channels=LISTENER_CHANNELS,
+        fallback_channel=SLACK_CHANNEL,
+        client=web,
+        channel_thresholds_raw=LISTENER_CHANNEL_THRESHOLDS,
+    )
+    if state.allow_all_channels:
+        channel = CHANNEL
+    else:
+        channel = next(iter(state.allowed_channels), CHANNEL)
 
     cases = [
         (
@@ -105,7 +112,7 @@ def main() -> int:
         ),
     ]
 
-    results = [_run_case(case_id, event, expect) for case_id, event, expect in cases]
+    results = [_run_case(case_id, event, expect, state) for case_id, event, expect in cases]
     ok = all(r["ok"] for r in results)
     print(json.dumps({"ok": ok, "cases": results}, indent=2))
     return 0 if ok else 1

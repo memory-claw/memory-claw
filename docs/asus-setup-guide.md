@@ -65,18 +65,48 @@ cd ~/memory-claw
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**
 2. Name it (e.g. "Institutional Memory") and pick the workspace
 3. **Socket Mode** → Enable Socket Mode → generate app-level token with `connections:write` → that's your `SLACK_APP_TOKEN`
-4. **OAuth & Permissions** → add bot scopes: `chat:write`, `channels:history`, `channels:read`
-5. **Event Subscriptions** → Enable Events → Subscribe to bot events: `message.channels`, `app_mention`
+4. **OAuth & Permissions** → add bot scopes: `chat:write`, `channels:history`, `channels:read` (private channels: also `groups:history`, `groups:read`)
+5. **Event Subscriptions** → Enable Events → Subscribe to bot events: `message.channels`, `app_mention` (private: `message.groups`)
 6. **Install to Workspace** → copy the Bot User OAuth Token → that's your `SLACK_BOT_TOKEN`
 7. Invite the bot to the channel: `/invite @Institutional Memory` in Slack
 
-Optional `.env` vars for the answer loop (see `.env.example`):
+### Recommended demo `.env` (listener + OpenClaw)
+
+See [`.env.example`](../.env.example). For autonomous Slack in any channel the bot is invited to:
 
 ```text
-LISTENER_CHANNELS=#institutional-memory
-UNPROMPTED_THRESHOLD=0.80
+LISTENER_CHANNELS=*
+UNPROMPTED_THRESHOLD=0.65
 THREAD_THRESHOLD=0.65
 ```
+
+`UNPROMPTED_THRESHOLD` defaults to `0.80` in code when unset; lower it for demos so on-topic messages match mock corpus more often.
+
+Optional per-channel overrides: `LISTENER_CHANNEL_THRESHOLDS=#general:0.85` (stricter in noisy channels).
+
+Optional faster inbox processing after live Slack ingest: `OPENCLAW_WAKE_CMD` (shell command; empty = heartbeat-only).
+
+## Two systems: who intervenes when
+
+| Component | Role | Runs on its own? | Slack behavior |
+|-----------|------|------------------|----------------|
+| `scripts/slack_listener.py` | Socket Mode: ingest + answer loop | Yes, if `SLACK_APP_TOKEN` + process running | @mention in **any** channel; unprompted only per `LISTENER_CHANNELS` (`*` = all invited channels) |
+| OpenClaw + `HEARTBEAT.md` | Every 1–2 min: `list-new-drafts` → SOUL workflow | Yes, if gateway + heartbeat enabled | Posts via `send-slack`; uses draft `slack_channel_id` / `slack_thread_ts` when present |
+
+```text
+Slack message → listener (search + in-thread reply in same channel)
+              → company/inbox/slack/*.md → OpenClaw heartbeat (SOUL message in thread or SLACK_CHANNEL)
+```
+
+**Autonomous intervention checklist**
+
+1. `uv run python scripts/slack_listener_status.py` → listening
+2. `systemctl --user status memory-claw-slack-listener` (or `./scripts/start_slack_listener.sh`)
+3. OpenClaw gateway running; `HEARTBEAT.md` in `~/.openclaw/workspace/`
+4. `uv run python scripts/ingest_corpus.py --force`
+5. Bot invited in target channels (`/invite @YourBot`)
+6. Tune skips: `tail -f audit_log.jsonl | grep listener_skip`
+7. Restart listener after `.env` changes
 
 ## Step 5: Verify Ollama Is Running
 
@@ -191,7 +221,7 @@ Channel: **`#institutional-memory`**. Use a real @mention (pick **@Memory Claw**
 | G2 | @Memory Claw … add rate limiting after launch | Rate limit / export outage docs |
 | G3 | @Memory Claw … send them our `.env` | Secrets / credentials incident |
 | G4 | @Memory Claw random xyz123 | “didn't find anything relevant” |
-| N1 | Dark mode opinion (**no** @bot) | **No** reply |
+| N1 | Dark mode opinion (**no** @bot) | **No** reply (off-topic); with `LISTENER_CHANNELS=*` and low threshold, on-topic unprompted text **may** reply |
 
 CLI preflight:
 
@@ -213,6 +243,11 @@ Demo lines: see `company/corpus/mock_data/README.md`.
 | `slack_listener_status` shows multiple PIDs | Duplicate listeners | `pkill -f 'python3 scripts/slack_listener.py'`; start one via systemd |
 | No events at all | Missing `app_mention` bot event | Slack app → Event Subscriptions → add `app_mention`, `message.channels`, reinstall |
 | “didn't find anything” on good questions | Stale index | `uv run python scripts/ingest_corpus.py --force` |
+| No unprompted reply in other channels | Channel not allowlisted (before `*`) or bot not invited | Set `LISTENER_CHANNELS=*` or add channel names; `/invite @bot` |
+| `listener_skip` `not_in_allowlist` | Unprompted outside allowlist | Use `LISTENER_CHANNELS=*` or @mention |
+| `listener_skip` `below_threshold` | Corpus match too weak | Lower `UNPROMPTED_THRESHOLD`; post on-topic text; re-ingest corpus |
+| OpenClaw posts only to `#institutional-memory` | Non-Slack draft or missing metadata | Slack inbox files include `**Channel:**` / `**Thread TS:**`; SOUL uses `--channel` / `--thread-ts` |
+| Inbox file but no SOUL post for 1–2 min | Heartbeat off or gateway down | Start gateway; copy `HEARTBEAT.md`; optional `OPENCLAW_WAKE_CMD` |
 
 ## Important Warnings
 

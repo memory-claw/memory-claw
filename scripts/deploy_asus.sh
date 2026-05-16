@@ -40,6 +40,21 @@ if [ -n "${SLACK_BOT_TOKEN:-}" ] || [ -n "${SLACK_CHANNEL:-}" ] || [ -n "$SLACK_
     printf 'SLACK_CHANNEL=%s\n' "$SLACK_CHANNEL"
     printf 'SLACK_WEBHOOK_URL=%s\n' "$SLACK_WEBHOOK_URL"
     printf 'SLACK_APP_TOKEN=%s\n' "${SLACK_APP_TOKEN:-}"
+    if [ -n "${LISTENER_CHANNELS:-}" ]; then
+      printf 'LISTENER_CHANNELS=%s\n' "$LISTENER_CHANNELS"
+    fi
+    if [ -n "${UNPROMPTED_THRESHOLD:-}" ]; then
+      printf 'UNPROMPTED_THRESHOLD=%s\n' "$UNPROMPTED_THRESHOLD"
+    fi
+    if [ -n "${THREAD_THRESHOLD:-}" ]; then
+      printf 'THREAD_THRESHOLD=%s\n' "$THREAD_THRESHOLD"
+    fi
+    if [ -n "${LISTENER_CHANNEL_THRESHOLDS:-}" ]; then
+      printf 'LISTENER_CHANNEL_THRESHOLDS=%s\n' "$LISTENER_CHANNEL_THRESHOLDS"
+    fi
+    if [ -n "${OPENCLAW_WAKE_CMD:-}" ]; then
+      printf 'OPENCLAW_WAKE_CMD=%s\n' "$OPENCLAW_WAKE_CMD"
+    fi
   } >"$REMOTE_ENV_FILE"
   ssh -i "$ASUS_SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ASUS_USER_HOST" \
     "set -eu; PATH=\$HOME/.local/bin:\$PATH; cd $ASUS_REPO; umask 077; cat > .env" <"$REMOTE_ENV_FILE"

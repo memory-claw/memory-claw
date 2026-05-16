@@ -16,3 +16,8 @@ ingested_files.json
 demo_artifacts/*
 !demo_artifacts/.gitkeep
 .worktrees/
+.agents/
+skills-lock.json
+skills/caveman
+skills/caveman-*
+skills/cavecrew
