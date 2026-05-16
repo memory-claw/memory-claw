@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 from institutional_memory.listener import (
     DedupeSet,
     ListenerState,
+    build_thread_context,
     build_search_query,
     format_no_hits_reply,
     format_reply,
@@ -225,6 +226,45 @@ def test_query_thread_api_failure_falls_back():
     client = FakeFailingRepliesClient()
     query = build_search_query(event, bot_user_id="U999", client=client)
     assert query == "help me"
+
+
+def test_thread_context_prefers_recent_human_messages():
+    event = {"channel": "C123", "text": "latest?", "ts": "2.0", "thread_ts": "1.0"}
+    replies = [{"user": "U123", "text": f"message {i}"} for i in range(12)]
+    client = FakeRepliesClient(replies)
+
+    context = build_thread_context(event, bot_user_id="U999", client=client)
+
+    assert "message 0" not in context
+    assert "message 11" in context
+
+
+def test_thread_context_caps_at_2000_chars_and_filters_bots():
+    event = {"channel": "C123", "text": "summarize", "ts": "2.0", "thread_ts": "1.0"}
+    replies = [
+        {"bot_id": "B456", "text": "bot noise"},
+        {"user": "U123", "text": "x" * 3000},
+    ]
+    client = FakeRepliesClient(replies)
+
+    context = build_thread_context(event, bot_user_id="U999", client=client)
+
+    assert "bot noise" not in context
+    assert len(context) == 2000
+
+
+def test_thread_context_trims_to_newline_boundary():
+    event = {"channel": "C123", "text": "latest?", "ts": "2.0", "thread_ts": "1.0"}
+    replies = [
+        {"user": "U123", "text": "old " + ("x" * 100)},
+        {"user": "U123", "text": "recent one"},
+        {"user": "U123", "text": "recent two"},
+    ]
+    client = FakeRepliesClient(replies)
+
+    context = build_thread_context(event, bot_user_id="U999", client=client, max_chars=30)
+
+    assert context == "recent one\nrecent two"
 
 
 # --- Task 4: Reply formatting ---

@@ -104,43 +104,54 @@ def _is_bot_message(message: dict[str, Any], bot_user_id: str) -> bool:
     return bool(message.get("bot_id") or message.get("user") == bot_user_id)
 
 
+def build_thread_context(
+    event: dict[str, Any],
+    bot_user_id: str,
+    client: Any,
+    limit: int = 10,
+    max_chars: int = 2000,
+) -> str:
+    thread_ts = event.get("thread_ts")
+
+    if not thread_ts or client is None:
+        return ""
+
+    try:
+        response = client.conversations_replies(
+            channel=event["channel"], ts=thread_ts, limit=limit
+        )
+        messages = response.get("messages", [])
+    except Exception:
+        return ""
+
+    human_texts: list[str] = []
+    for msg in messages:
+        if _is_bot_message(msg, bot_user_id):
+            continue
+        msg_text = strip_mention(str(msg.get("text", "")), bot_user_id).strip()
+        if msg_text:
+            human_texts.append(msg_text)
+
+    recent = human_texts[-limit:]
+    context = "\n".join(recent)
+    if len(context) <= max_chars:
+        return context
+
+    tail = context[-max_chars:]
+    newline_index = tail.find("\n")
+    if newline_index >= 0:
+        return tail[newline_index + 1 :]
+    return tail
+
+
 def build_search_query(
     event: dict[str, Any],
     bot_user_id: str,
     client: Any,
 ) -> str:
     text = strip_mention(str(event.get("text", "")), bot_user_id)
-    thread_ts = event.get("thread_ts")
-
-    if not thread_ts or client is None:
-        return text
-
-    try:
-        response = client.conversations_replies(
-            channel=event["channel"], ts=thread_ts, limit=10
-        )
-        messages = response.get("messages", [])
-    except Exception:
-        return text
-
-    context_parts: list[str] = []
-    total_chars = 0
-    for msg in messages:
-        if _is_bot_message(msg, bot_user_id):
-            continue
-        msg_text = strip_mention(str(msg.get("text", "")), bot_user_id).strip()
-        if not msg_text:
-            continue
-        if total_chars + len(msg_text) > 2000:
-            remaining = 2000 - total_chars
-            if remaining > 0:
-                context_parts.append(msg_text[:remaining])
-            break
-        context_parts.append(msg_text)
-        total_chars += len(msg_text)
-
-    if context_parts:
-        context = "\n".join(context_parts)
+    context = build_thread_context(event, bot_user_id=bot_user_id, client=client)
+    if context:
         return f"{context}\n\n{text}"
     return text
 
