@@ -44,6 +44,7 @@ def test_detect_response_intent(text, expected):
         (" advice: off ", "off"),
         ("ADVICE OFFER", "offer"),
         ("advice: offer", "offer"),
+        ("advice", "on"),
         ("advice please", None),
     ],
 )

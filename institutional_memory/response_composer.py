@@ -18,6 +18,7 @@ MAX_MODEL_REPLY_CHARS = 3000
 _ADVICE_TERMS = ("advice", "tips", "next move", "should we", "recommend", "what should")
 _PRECEDENT_TERMS = ("precedent", "last time", "similar prior", "previous example", "happened before")
 _ADVICE_COMMANDS: dict[str, AdviceMode] = {
+    "advice": "on",
     "advice on": "on",
     "advice: on": "on",
     "advice off": "off",
