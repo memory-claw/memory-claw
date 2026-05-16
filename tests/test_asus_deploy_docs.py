@@ -6,7 +6,11 @@ def test_deploy_script_uses_tailscale_and_ssh_key_without_password():
 
     assert "100.68.221.47" in script
     assert "tailscale ping" in script
+    assert "tailscale status" in script
+    assert "tailscale netcheck" in script
     assert "ssh -i" in script
+    assert "BatchMode=yes" in script
+    assert "StrictHostKeyChecking=accept-new" in script
     assert "ASUS_BRANCH" in script
     assert "git fetch origin" in script
     assert "git checkout -B" in script
@@ -24,6 +28,8 @@ def test_github_action_deploys_over_tailscale_without_password():
     workflow = Path(".github/workflows/deploy-asus.yml").read_text(encoding="utf-8")
 
     assert "tailscale/github-action@v4" in workflow
+    assert "main" in workflow
+    assert "codex/institutional-memory-engine" in workflow
     assert "100.68.221.47" in workflow
     assert "ASUS_SSH_KEY" in workflow
     assert "scripts/deploy_asus.sh" in workflow

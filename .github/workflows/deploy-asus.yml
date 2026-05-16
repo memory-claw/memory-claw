@@ -3,6 +3,7 @@ name: Deploy ASUS
 on:
   push:
     branches:
+      - main
       - codex/institutional-memory-engine
   workflow_dispatch:
 
@@ -32,4 +33,5 @@ jobs:
           ASUS_SSH_KEY: /home/runner/.ssh/asus_deploy
           ASUS_TAILSCALE_IP: 100.68.221.47
           ASUS_USER_HOST: asus@100.68.221.47
+          ASUS_BRANCH: ${{ github.ref_name }}
         run: scripts/deploy_asus.sh
