@@ -19,6 +19,8 @@ GENERIC_QUERY_WORDS = {
 }
 
 RFP_SOURCE = "corpus/2023_rfp_postmortem.txt"
+RFP_DRAFT = "inbox/new_rfp_draft.txt"
+SILENT_DRAFT = "inbox/000_silent_clinical_trial_protocol.txt"
 
 
 def run(command: list[str], timeout: int = 180) -> dict:
@@ -71,6 +73,22 @@ def audit_blockers(audit_text: str | None = None) -> list[str]:
         blockers.append("missing success processed proof")
     if "skipped_no_relevant_memory" not in processed_statuses:
         blockers.append("missing silent-case processed proof")
+    if not any(
+        event.get("type") == "processed"
+        and event.get("driver") == "openclaw"
+        and event.get("path") == RFP_DRAFT
+        and event.get("status") == "sent"
+        for event in events
+    ):
+        blockers.append("missing RFP processed proof")
+    if not any(
+        event.get("type") == "processed"
+        and event.get("driver") == "openclaw"
+        and event.get("path") == SILENT_DRAFT
+        and event.get("status") == "skipped_no_relevant_memory"
+        for event in events
+    ):
+        blockers.append("missing silent processed proof")
     if not any(
         event.get("type") == "memory_searched"
         and event.get("driver") == "openclaw"
