@@ -19,6 +19,7 @@ from institutional_memory.response_composer import (
     should_accept_advice_offer,
 )
 from institutional_memory.search import search_memory
+from institutional_memory.source_policy import parse_source_command, render_source_command
 
 
 def should_skip(event: dict[str, Any], bot_user_id: str) -> bool:
@@ -214,6 +215,8 @@ def format_no_hits_reply() -> str:
 
 # --- Task 5: Main handler ---
 
+FULL_SOURCE_COOLDOWN_SECONDS = 30.0
+
 
 @dataclass
 class ListenerState:
@@ -265,6 +268,31 @@ def _commit_advice_mode(
     state.thread_advice_offer_pending.discard(key)
 
 
+def _handle_source_command(
+    text: str,
+    key: tuple[str, str],
+    state: ListenerState,
+) -> str | None:
+    command = parse_source_command(text)
+    if command is None:
+        return None
+
+    refs = state.thread_source_refs.get(key)
+    if not refs:
+        return "I do not have a recent source list for this thread."
+
+    if command.kind == "full":
+        cooldown_key = (key[0], key[1], command.index)
+        now = time.monotonic()
+        previous = state.thread_full_source_cooldowns.get(cooldown_key)
+        if previous is not None and now - previous < FULL_SOURCE_COOLDOWN_SECONDS:
+            remaining = round(FULL_SOURCE_COOLDOWN_SECONDS - (now - previous))
+            return f"Please wait {remaining} seconds before showing full source {command.index} again."
+        state.thread_full_source_cooldowns[cooldown_key] = now
+
+    return render_source_command(command, refs)["text"]
+
+
 def handle_listener_event(
     event: dict[str, Any],
     client: Any,
@@ -307,6 +335,27 @@ def handle_listener_event(
                 sources=[],
                 triggered_by="thread",
                 response_intent="toggle",
+                advice_mode=advice_mode,
+            )
+            return {"status": "replied", "hits": 0, "triggered_by": "thread"}
+        except Exception as exc:
+            log_event("listener_error", channel=channel, error=str(exc))
+            return {"status": "error", "error": str(exc)}
+
+    source_reply = _handle_source_command(command_text, key, state)
+    if source_reply:
+        advice_mode = state.thread_advice_modes.get(key, "offer")
+        try:
+            client.chat_postMessage(channel=channel, text=source_reply, thread_ts=thread_ts)
+            log_event(
+                "listener_reply",
+                channel=channel,
+                thread_ts=thread_ts,
+                query="",
+                top_score=0,
+                sources=[],
+                triggered_by="thread",
+                response_intent="source",
                 advice_mode=advice_mode,
             )
             return {"status": "replied", "hits": 0, "triggered_by": "thread"}
