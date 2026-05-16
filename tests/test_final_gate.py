@@ -38,7 +38,8 @@ def test_audit_requires_success_and_silent_case(tmp_path, monkeypatch):
     events = [
         {"type": "draft_listed", "driver": "openclaw"},
         {"type": "draft_read", "driver": "openclaw"},
-        {"type": "memory_searched", "driver": "openclaw", "query": "RFP liability indemnification"},
+        {"type": "memory_searched", "driver": "openclaw", "query": "RFP liability indemnification", "count": 1},
+        {"type": "memory_searched", "driver": "openclaw", "query": "clinical trial dermatology", "count": 0},
         {"type": "slack_sent", "driver": "openclaw", "status": "sent"},
         {"type": "processed", "driver": "openclaw", "status": "sent"},
     ]
@@ -50,12 +51,31 @@ def test_audit_requires_success_and_silent_case(tmp_path, monkeypatch):
     assert "missing silent-case processed proof" in blockers
 
 
+def test_audit_requires_silent_zero_hit_search_proof(tmp_path, monkeypatch):
+    audit = tmp_path / "audit_log.jsonl"
+    events = [
+        {"type": "draft_listed", "driver": "openclaw"},
+        {"type": "draft_read", "driver": "openclaw"},
+        {"type": "memory_searched", "driver": "openclaw", "query": "RFP liability indemnification", "count": 1},
+        {"type": "slack_sent", "driver": "openclaw", "status": "sent"},
+        {"type": "processed", "driver": "openclaw", "status": "sent"},
+        {"type": "processed", "driver": "openclaw", "status": "skipped_no_relevant_memory"},
+    ]
+    audit.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
+    monkeypatch.setattr(final_gate, "AUDIT_LOG", audit)
+
+    blockers = final_gate.audit_blockers()
+
+    assert "missing silent zero-hit search proof" in blockers
+
+
 def test_audit_requires_sent_slack_event(tmp_path, monkeypatch):
     audit = tmp_path / "audit_log.jsonl"
     events = [
         {"type": "draft_listed", "driver": "openclaw"},
         {"type": "draft_read", "driver": "openclaw"},
-        {"type": "memory_searched", "driver": "openclaw", "query": "RFP liability indemnification"},
+        {"type": "memory_searched", "driver": "openclaw", "query": "RFP liability indemnification", "count": 1},
+        {"type": "memory_searched", "driver": "openclaw", "query": "clinical trial dermatology", "count": 0},
         {"type": "slack_sent", "driver": "openclaw", "status": "slack_failed"},
         {"type": "processed", "driver": "openclaw", "status": "sent"},
         {"type": "processed", "driver": "openclaw", "status": "skipped_no_relevant_memory"},
@@ -93,7 +113,8 @@ def test_main_snapshots_audit_before_child_checks(tmp_path, monkeypatch, capsys)
     events = [
         {"type": "draft_listed", "driver": "openclaw"},
         {"type": "draft_read", "driver": "openclaw"},
-        {"type": "memory_searched", "driver": "openclaw", "query": "RFP liability indemnification"},
+        {"type": "memory_searched", "driver": "openclaw", "query": "RFP liability indemnification", "count": 1},
+        {"type": "memory_searched", "driver": "openclaw", "query": "clinical trial dermatology", "count": 0},
         {"type": "slack_sent", "driver": "openclaw", "status": "sent"},
         {"type": "processed", "driver": "openclaw", "status": "sent"},
         {"type": "processed", "driver": "openclaw", "status": "skipped_no_relevant_memory"},

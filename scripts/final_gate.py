@@ -70,6 +70,13 @@ def audit_blockers(audit_text: str | None = None) -> list[str]:
     if "skipped_no_relevant_memory" not in processed_statuses:
         blockers.append("missing silent-case processed proof")
     if not any(
+        event.get("type") == "memory_searched"
+        and event.get("driver") == "openclaw"
+        and event.get("count") == 0
+        for event in events
+    ):
+        blockers.append("missing silent zero-hit search proof")
+    if not any(
         event.get("type") == "slack_sent"
         and event.get("driver") == "openclaw"
         and event.get("status") == "sent"
