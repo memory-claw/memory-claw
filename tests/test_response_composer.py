@@ -78,9 +78,8 @@ def test_compose_fallback_answer_context_includes_memory_sources_and_footer():
     assert "Team delayed broad launch until customer support reviewed the migration plan." in answer
     assert "Sources:" in answer
     assert "launch_review.md (76%)" in answer
-    assert 'Next: reply "advice"' in answer
-    assert "show source 1" in answer
-    assert "or show full source 1" in answer
+    assert 'Next: try "advice", "compare to precedent", or "show source 1".' in answer
+    assert "show full source 1" not in answer
 
 
 def test_compose_fallback_answer_uses_cite_only_wording_for_empty_text():
@@ -204,7 +203,7 @@ def test_compose_slack_answer_preserves_footer_on_model_response(monkeypatch):
     answer = compose_slack_answer("Need more information", [_hit()], intent="context", include_footer=True)
 
     assert "Model-grounded reply" in answer
-    assert 'Next: reply "advice"' in answer
+    assert 'Next: try "advice", "compare to precedent", or "show source 1".' in answer
 
 
 def test_compose_slack_answer_bounds_thread_text_sent_to_model(monkeypatch):

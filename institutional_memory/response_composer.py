@@ -174,18 +174,18 @@ def _sources_section(hits: list[dict[str, Any]]) -> str:
 def _footer(hits: list[dict[str, Any]], *, advice_mode: AdviceMode) -> str:
     commands: list[str] = []
     if advice_mode == "offer":
-        commands.append('reply "advice"')
+        commands.append('"advice"')
+    commands.append('"compare to precedent"')
 
     for index, hit in enumerate(hits, start=1):
         access = str(hit.get("access", ""))
         if access in {"excerpt", "share"}:
-            commands.append(f"show source {index}")
-        if access == "share":
-            commands.append(f"show full source {index}")
+            commands.append(f'"show source {index}"')
+            break
 
     if not commands:
         return ""
-    return "Next: " + _join_english(commands) + "."
+    return "Next: try " + _join_english(commands) + "."
 
 
 def _messages(
