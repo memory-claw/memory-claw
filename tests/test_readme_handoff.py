@@ -42,11 +42,21 @@ def test_readme_documents_current_slack_behavior():
     readme = Path("README.md").read_text(encoding="utf-8")
 
     assert "## Slack Behavior" in readme
-    assert "Current Slack support is outbound only" in readme
-    assert "does not read Slack channel history yet" in readme
     assert "should not post raw ingested Slack messages" in readme
     assert "company/corpus/slack/" in readme
     assert "skipped_no_relevant_memory" in readme
+
+
+def test_readme_documents_slack_ingestion():
+    readme = Path("README.md").read_text(encoding="utf-8")
+
+    assert "SLACK_APP_TOKEN" in readme
+    assert "uv run python scripts/slack_listener.py" in readme
+    assert "./bin/imem sync-slack --mode inbox" in readme
+    assert "./bin/imem sync-slack --mode corpus" in readme
+    assert "./bin/imem promote-slack-thread" in readme
+    assert "uv run python scripts/ingest_corpus.py --force" in readme
+    assert "--clear-slack-inbox" in readme
 
 
 def test_plan_names_current_repo_path():

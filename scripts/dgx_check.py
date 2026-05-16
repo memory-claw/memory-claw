@@ -101,10 +101,21 @@ def slack_secret_blockers(token: str | None = None, channel: str | None = None) 
     return blockers
 
 
+def slack_ingestion_blockers(app_token: str | None = None) -> list[str]:
+    if app_token is None:
+        app_token = os.getenv("SLACK_APP_TOKEN")
+    if not app_token:
+        return ["SLACK_APP_TOKEN missing"]
+    if app_token == "xapp-your-token-here":
+        return ["SLACK_APP_TOKEN is still the .env.example placeholder"]
+    return []
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="DGX/ASUS readiness check")
     parser.add_argument("--skip-model-smoke", action="store_true")
     parser.add_argument("--skip-backup-video", action="store_true")
+    parser.add_argument("--check-slack-ingestion", action="store_true")
     args = parser.parse_args()
     blockers: list[str] = []
 
@@ -113,6 +124,9 @@ def main() -> int:
         blockers.append(f"pytest failed: {output[-1000:]}")
 
     blockers.extend(slack_secret_blockers())
+
+    if args.check_slack_ingestion:
+        blockers.extend(slack_ingestion_blockers())
 
     if not args.skip_model_smoke:
         ok, message = model_smoke()

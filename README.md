@@ -166,16 +166,15 @@ memory passes the relevance threshold.
 
 ## Slack Behavior
 
-Current Slack support is outbound only. `SLACK_BOT_TOKEN` lets `./bin/imem
-send-slack` post OpenClaw's final memory-backed answer into `SLACK_CHANNEL`.
-It does not read Slack channel history yet.
+`SLACK_BOT_TOKEN` lets `./bin/imem send-slack` post OpenClaw's final
+memory-backed answer into `SLACK_CHANNEL`.
 
 The bot should not post raw ingested Slack messages. It posts only when an
 active inbox draft/thread matches useful institutional memory from `company/corpus/`.
 The message should summarize the relevant context and include source
 attribution, for example `company/corpus/2023_rfp_postmortem.txt`.
 
-Planned Slack ingestion should use Slack as an input source:
+Slack ingestion uses Slack as an input source:
 
 - resolved historical Slack threads belong in `company/corpus/slack/`, then run
   `uv run python scripts/ingest_corpus.py --force`
@@ -183,6 +182,51 @@ Planned Slack ingestion should use Slack as an input source:
   OpenClaw to check the inbox
 - noise or casual threads should be marked `skipped_no_relevant_memory` and
   should not send Slack
+
+## Slack Ingestion
+
+Slack ingestion has two paths.
+
+Live intake runs outside OpenClaw:
+
+```bash
+uv run python scripts/slack_listener.py
+```
+
+The listener requires:
+
+```text
+SLACK_APP_TOKEN=xapp-...
+SLACK_BOT_TOKEN=xoxb-...
+```
+
+Manual active import writes Slack threads to inbox:
+
+```bash
+./bin/imem sync-slack --mode inbox --channel C123 --limit 20
+```
+
+Manual historical import writes trusted Slack threads to corpus:
+
+```bash
+./bin/imem sync-slack --mode corpus --channel C123 --limit 100
+uv run python scripts/ingest_corpus.py --force
+```
+
+Manual promotion copies a processed Slack inbox file into corpus:
+
+```bash
+./bin/imem promote-slack-thread --path company/inbox/slack/C123_1710000000.000000.md
+uv run python scripts/ingest_corpus.py --force
+```
+
+For a clean Slack ingestion demo:
+
+```bash
+./bin/imem reset-demo --clear-audit --clear-slack-inbox
+```
+
+Do not add `scripts/slack_listener.py` to OpenClaw's exec allowlist.
 
 ## ASUS Run
 

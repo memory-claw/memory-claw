@@ -94,3 +94,19 @@ def test_slack_secret_check_requires_explicit_channel():
     assert dgx_check.slack_secret_blockers("xoxb-real-looking-token") == [
         "SLACK_CHANNEL missing"
     ]
+
+
+def test_slack_ingestion_blockers_require_app_token(monkeypatch):
+    monkeypatch.delenv("SLACK_APP_TOKEN", raising=False)
+
+    assert dgx_check.slack_ingestion_blockers() == ["SLACK_APP_TOKEN missing"]
+
+
+def test_slack_ingestion_blockers_reject_placeholder():
+    assert dgx_check.slack_ingestion_blockers("xapp-your-token-here") == [
+        "SLACK_APP_TOKEN is still the .env.example placeholder"
+    ]
+
+
+def test_slack_ingestion_blockers_accept_real_token():
+    assert dgx_check.slack_ingestion_blockers("xapp-real-token") == []
