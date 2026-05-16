@@ -26,6 +26,17 @@ def test_readme_documents_asus_setup_and_rerun_flow():
     assert "demo_artifacts/" in readme
 
 
+def test_readme_documents_company_data_intake():
+    readme = Path("README.md").read_text(encoding="utf-8")
+
+    assert "## Company Data" in readme
+    assert "corpus/company/" in readme
+    assert "inbox/company/" in readme
+    assert "Do not put secrets" in readme
+    assert "uv run python scripts/ingest_corpus.py --force" in readme
+    assert "./bin/imem list-new-drafts" in readme
+
+
 def test_plan_names_current_repo_path():
     plan = Path("2026-05-15-institutional-memory-engine.md").read_text(encoding="utf-8")
 

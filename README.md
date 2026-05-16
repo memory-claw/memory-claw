@@ -103,6 +103,67 @@ scp -i ~/.ssh/asus_deploy ~/Downloads/mock_data.txt asus@100.68.221.47:/home/asu
 
 Supported demo input types are `.txt`, `.md`, and `.pdf`.
 
+## Company Data
+
+Use two buckets:
+
+```text
+corpus/company/ # historical memory: postmortems, policies, contracts, Slack exports
+inbox/company/  # active drafts/threads that need a response
+```
+
+Put stable company knowledge in `corpus/company/`. Good examples:
+
+- postmortems and incident reports
+- won/lost bid writeups
+- legal memos and approved clauses
+- security/vendor policies
+- exported Slack threads that describe decisions
+- meeting notes with named owners and outcomes
+
+Put only the item you want OpenClaw to evaluate in `inbox/` or a top-level
+`inbox/company_*.md` file. The current inbox scanner lists top-level `.txt`,
+`.md`, and `.pdf` files; keep active demo drafts at the top level unless you add
+recursive inbox support.
+
+Do not put secrets, credentials, private keys, raw customer PII, or production
+tokens in `corpus/` or `inbox/`. Redact first.
+
+Recommended file format:
+
+```markdown
+# Short Human Title
+
+**Date:** 2024-03-01
+**Owner:** Name / team
+**Outcome:** What happened or what policy changed
+**Risk:** Low/Medium/High/Critical
+
+## Context
+What happened, who was involved, and why it matters.
+
+## Decision or Lesson
+What future teams should remember.
+
+## Source Attribution
+Original system, channel, meeting, or document reference.
+```
+
+After adding company memory:
+
+```bash
+uv run python scripts/ingest_corpus.py --force
+```
+
+After adding a new draft/thread to check:
+
+```bash
+./bin/imem list-new-drafts
+```
+
+Then ask OpenClaw to check the inbox. The bot posts to Slack only when retrieved
+memory passes the relevance threshold.
+
 ## ASUS Run
 
 From OpenClaw, ask:
