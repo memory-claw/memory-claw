@@ -1,4 +1,5 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
-exec uv run imem "$@"
+UV=$(command -v uv 2>/dev/null || echo "$HOME/.local/bin/uv")
+exec "$UV" run imem "$@"
