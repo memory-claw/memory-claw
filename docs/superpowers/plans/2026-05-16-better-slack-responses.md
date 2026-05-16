@@ -4,7 +4,7 @@
 
 **Goal:** Build grounded, source-aware Slack replies with per-thread advice toggles, precedent comparisons, and policy-controlled source display.
 
-**Architecture:** Add `source_policy.py` to decide which retrieved sources can be cited, excerpted, or fully shown before any LLM sees them. Add `response_composer.py` to classify intent, build deterministic fallback replies, and optionally call Ollama. Keep Slack event orchestration in `listener.py`, adding in-memory per-thread state for advice mode, footer display, source references, and source command cooldowns.
+**Architecture:** Add `source_policy.py` to decide which retrieved sources can be cited, excerpted, or fully shown before any LLM sees them. Add `response_composer.py` to classify intent, build deterministic fallback replies, and optionally call Ollama. Keep Slack event orchestration in `listener.py`, adding in-memory per-thread state for advice mode, footer display, source references, and source command cooldowns. That listener state is intentionally process-local for MVP and resets on restart.
 
 **Tech Stack:** Python 3.12, pytest, slack-sdk test doubles, Ollama Python client, PyYAML already present transitively but made explicit in `pyproject.toml`.
 
@@ -63,6 +63,7 @@ from pathlib import Path
 from institutional_memory.source_policy import (
     SourcePolicy,
     apply_source_policy,
+    load_source_policy,
     parse_source_command,
     render_source_command,
 )
@@ -86,6 +87,21 @@ def test_policy_last_match_wins():
         policy.access_for("company/corpus/mock_data/policy_docs/Secrets_Management_Policy.md")
         == "cite_only"
     )
+
+
+def test_load_demo_policy_file():
+    policy = load_source_policy(Path("company/corpus/.source_policy.yml"))
+    assert policy.access_for("company/corpus/mock_data/slack_threads/Vantara_Enterprise_Deal_Demo_Thread.md") == "share"
+    assert policy.access_for("company/corpus/2023_rfp_postmortem.txt") == "share"
+    assert (
+        policy.access_for("company/corpus/mock_data/policy_docs/Secrets_Management_Policy.md")
+        == "cite_only"
+    )
+    assert (
+        policy.access_for("company/corpus/mock_data/incidents/GitHub_Credentials_Leak_2023.md")
+        == "restricted"
+    )
+    assert policy.access_for("company/corpus/unlisted_new_doc.md") == "restricted"
 
 
 def test_apply_policy_filters_restricted_and_strips_cite_only_text():
@@ -186,6 +202,8 @@ In `pyproject.toml`, add to `[project].dependencies`:
 Create `company/corpus/.source_policy.yml`:
 
 ```yaml
+# Rules are evaluated top to bottom; the last matching rule wins.
+# Keep broad rules first and sensitive overrides last.
 default: restricted
 rules:
   - pattern: "company/corpus/mock_data/**"
@@ -766,6 +784,18 @@ def test_thread_context_caps_at_2000_chars_and_filters_bots():
     context = build_thread_context(event, bot_user_id="U999", client=client, limit=10, max_chars=2000)
     assert "bot noise" not in context
     assert len(context) == 2000
+
+
+def test_thread_context_trims_to_newline_boundary():
+    event = {"channel": "C123", "text": "latest", "ts": "4.0", "thread_ts": "1.0"}
+    replies = [
+        {"user": "U123", "text": "old message " + ("x" * 100)},
+        {"user": "U123", "text": "recent one"},
+        {"user": "U123", "text": "recent two"},
+    ]
+    client = FakeRepliesClient(replies)
+    context = build_thread_context(event, bot_user_id="U999", client=client, limit=10, max_chars=30)
+    assert context == "recent one\nrecent two"
 ```
 
 - [ ] **Step 2: Run new thread context tests to verify failure**
@@ -773,7 +803,7 @@ def test_thread_context_caps_at_2000_chars_and_filters_bots():
 Run:
 
 ```bash
-uv run pytest tests/test_listener.py::test_thread_context_prefers_recent_human_messages tests/test_listener.py::test_thread_context_caps_at_2000_chars_and_filters_bots -v
+uv run pytest tests/test_listener.py::test_thread_context_prefers_recent_human_messages tests/test_listener.py::test_thread_context_caps_at_2000_chars_and_filters_bots tests/test_listener.py::test_thread_context_trims_to_newline_boundary -v
 ```
 
 Expected: fail with `ImportError` for `build_thread_context`.
@@ -812,7 +842,11 @@ def build_thread_context(
     context = "\n".join(recent)
     if len(context) <= max_chars:
         return context
-    return context[-max_chars:]
+    tail = context[-max_chars:]
+    newline_index = tail.find("\n")
+    if newline_index != -1:
+        return tail[newline_index + 1 :]
+    return tail
 ```
 
 Replace the body of `build_search_query()` with:
@@ -835,7 +869,7 @@ def build_search_query(
 Run:
 
 ```bash
-uv run pytest tests/test_listener.py::test_query_thread_includes_human_context tests/test_listener.py::test_query_thread_filters_bot_id_messages tests/test_listener.py::test_query_thread_caps_context_at_2000_chars tests/test_thread_context_prefers_recent_human_messages tests/test_thread_context_caps_at_2000_chars_and_filters_bots -v
+uv run pytest tests/test_listener.py::test_query_thread_includes_human_context tests/test_listener.py::test_query_thread_filters_bot_id_messages tests/test_listener.py::test_query_thread_caps_context_at_2000_chars tests/test_thread_context_prefers_recent_human_messages tests/test_thread_context_caps_at_2000_chars_and_filters_bots tests/test_thread_context_trims_to_newline_boundary -v
 ```
 
 Expected: selected tests pass. If `test_query_thread_caps_context_at_2000_chars` expects `<= 2100`, keep it passing because query contains the capped context plus current message.
@@ -862,11 +896,11 @@ git commit -m "refactor: share slack thread context window"
 Append to `tests/test_listener.py`:
 
 ```python
-def test_advice_on_command_updates_thread_mode_without_search():
+def test_mention_advice_on_command_updates_thread_mode_without_search():
     state = _make_state()
     state.active_threads.add(("C100", "1.0"))
     client = MockWebClient()
-    event = {"type": "message", "channel": "C100", "ts": "2.0", "thread_ts": "1.0", "user": "U123", "text": "advice on"}
+    event = {"type": "message", "channel": "C100", "ts": "2.0", "thread_ts": "1.0", "user": "U123", "text": "<@UBOT> advice on"}
 
     with patch("institutional_memory.listener.search_memory") as search:
         with patch("institutional_memory.listener.log_event"):
@@ -912,7 +946,7 @@ def test_short_yes_after_pending_offer_sets_advice_on_without_search():
 Run:
 
 ```bash
-uv run pytest tests/test_listener.py::test_advice_on_command_updates_thread_mode_without_search tests/test_listener.py::test_short_yes_requires_pending_offer tests/test_listener.py::test_short_yes_after_pending_offer_sets_advice_on_without_search -v
+uv run pytest tests/test_listener.py::test_mention_advice_on_command_updates_thread_mode_without_search tests/test_listener.py::test_short_yes_requires_pending_offer tests/test_listener.py::test_short_yes_after_pending_offer_sets_advice_on_without_search -v
 ```
 
 Expected: fail because `ListenerState` lacks advice state fields and command handling.
@@ -944,6 +978,8 @@ class ListenerState:
     thread_source_refs: dict[tuple[str, str], list[dict[str, Any]]] = field(default_factory=dict)
     thread_full_source_cooldowns: dict[tuple[str, str, int], float] = field(default_factory=dict)
 ```
+
+These fields are intentionally in-memory only. They reset on listener restart; persistent state can be added later with a JSON file or Redis if production usage needs continuity across restarts.
 
 Add helper functions before `handle_listener_event()`:
 
@@ -980,7 +1016,8 @@ In `handle_listener_event()`, after `is_mention` and `is_active_thread` are comp
 
 ```python
     key = _thread_key(channel, thread_ts)
-    advice_reply = _handle_advice_mode_command(str(event.get("text", "")), key, state)
+    command_text = strip_mention(str(event.get("text", "")), state.bot_user_id)
+    advice_reply = _handle_advice_mode_command(command_text, key, state)
     if advice_reply is not None:
         try:
             client.chat_postMessage(channel=channel, text=advice_reply, thread_ts=thread_ts)
@@ -996,7 +1033,7 @@ In `handle_listener_event()`, after `is_mention` and `is_active_thread` are comp
 Run:
 
 ```bash
-uv run pytest tests/test_listener.py::test_advice_on_command_updates_thread_mode_without_search tests/test_listener.py::test_short_yes_requires_pending_offer tests/test_listener.py::test_short_yes_after_pending_offer_sets_advice_on_without_search -v
+uv run pytest tests/test_listener.py::test_mention_advice_on_command_updates_thread_mode_without_search tests/test_listener.py::test_short_yes_requires_pending_offer tests/test_listener.py::test_short_yes_after_pending_offer_sets_advice_on_without_search -v
 ```
 
 Expected: selected tests pass.
@@ -1123,7 +1160,8 @@ def _handle_source_command(
 In `handle_listener_event()`, after advice command handling and before search, insert:
 
 ```python
-    source_reply = _handle_source_command(str(event.get("text", "")), key, state)
+    command_text = strip_mention(str(event.get("text", "")), state.bot_user_id)
+    source_reply = _handle_source_command(command_text, key, state)
     if source_reply is not None:
         try:
             client.chat_postMessage(channel=channel, text=source_reply, thread_ts=thread_ts)
@@ -1288,6 +1326,8 @@ Add fields to `log_event()`:
         advice_mode=advice_mode,
 ```
 
+Use the existing `MAX_HITS = 3` constant in `institutional_memory/listener.py` for stored source refs and audit source lists.
+
 - [ ] **Step 4: Update `.env.example`**
 
 Append:
@@ -1390,13 +1430,16 @@ Expected: commit succeeds only if there are real implementation or test changes 
 
 - Source policy default remains `restricted`.
 - Demo policy explicitly marks mock corpus files as `share`.
+- Demo policy YAML documents that the last matching glob rule wins.
 - `restricted` hits are filtered before composer or LLM prompt construction.
 - `cite_only` hits keep filename/score but lose text before composer.
-- Advice mode is in-memory and per thread.
+- Advice mode, source refs, footer flags, and cooldowns are in-memory and reset on listener restart.
+- Mention-prefixed commands such as `<@UBOT> advice on` are stripped before command parsing.
 - Short `yes` and `no` only affect advice mode after an advice offer footer.
 - `show source N` and `show full source N` are handled before search.
 - Full source display is available only for `share` sources.
 - Full source display has a 30-second per-thread cooldown.
-- Thread context is capped to 10 human messages and 2,000 characters.
+- Thread context is capped to 10 human messages and 2,000 characters, trimming to a newline boundary when possible.
+- Source policy tests load the actual demo YAML file.
 - Normal reply path has a mocked integration test from event to Slack post.
 - Ollama generation has fallback tests.
