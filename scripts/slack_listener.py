@@ -44,6 +44,8 @@ def _build_state(web_client: WebClient) -> ListenerState:
     promotion_allowed_channels = resolve_channels(
         PROMOTION_ALLOWED_CHANNELS, fallback_channel="", client=web_client
     )
+    if not promotion_allowed_channels:
+        promotion_allowed_channels = set(allowed_channels)
 
     return ListenerState(
         bot_user_id=bot_user_id,
@@ -60,6 +62,23 @@ def process(
     web_client: WebClient,
     state: ListenerState,
 ) -> None:
+    if request.type == "slash_commands":
+        client.send_socket_mode_response(SocketModeResponse(envelope_id=request.envelope_id))
+        payload = request.payload
+        command = str(payload.get("command") or "/mem")
+        text = str(payload.get("text") or "").strip()
+        event = {
+            "type": "message",
+            "channel": str(payload.get("channel_id") or ""),
+            "user": str(payload.get("user_id") or ""),
+            "text": f"{command} {text}".strip(),
+            "ts": str(payload.get("trigger_id") or request.envelope_id),
+            "slash_command": True,
+        }
+        result = handle_listener_event(event, web_client, state)
+        print(json.dumps(result, ensure_ascii=False), flush=True)
+        return
+
     if request.type == "events_api":
         client.send_socket_mode_response(SocketModeResponse(envelope_id=request.envelope_id))
         event = request.payload.get("event", {})

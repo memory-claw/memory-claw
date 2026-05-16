@@ -11,6 +11,7 @@ from institutional_memory.listener import (
     format_no_hits_reply,
     format_reply,
     handle_listener_event,
+    parse_mem_command,
     resolve_channels,
     select_threshold,
     should_skip,
@@ -356,6 +357,25 @@ def test_format_no_hits_reply():
     assert "didn't find anything relevant" in result.lower()
 
 
+# --- Task 4b: Slack /mem commands ---
+
+
+def test_parse_mem_command_ask():
+    command = parse_mem_command("/mem ask what happened with ACME?")
+
+    assert command is not None
+    assert command.kind == "ask"
+    assert command.args == "what happened with ACME?"
+
+
+def test_parse_mem_command_source_alias():
+    command = parse_mem_command("/mem full-source 2")
+
+    assert command is not None
+    assert command.kind == "source"
+    assert command.args == "show full source 2"
+
+
 # --- Task 5: Main handler ---
 
 
@@ -446,6 +466,270 @@ def test_handle_reply_uses_policy_and_composer_fallback():
     compose.assert_called_once()
     assert state.thread_source_refs[("C100", "1.0")][0]["source"] == allowed
     assert all(ref["source"] != hidden for ref in state.thread_source_refs[("C100", "1.0")])
+
+
+def test_mem_help_posts_commands_without_search():
+    state = _make_state(allowed_channels=set())
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C999",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "/mem help",
+    }
+
+    with patch("institutional_memory.listener.search_memory") as search_memory:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert "/mem ask" in client.posted[0]["text"]
+    search_memory.assert_not_called()
+
+
+def test_bare_mem_command_posts_help_despite_short_text():
+    state = _make_state(allowed_channels=set())
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C999",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "/mem",
+    }
+
+    with patch("institutional_memory.listener.search_memory") as search_memory:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert "/mem ask" in client.posted[0]["text"]
+    search_memory.assert_not_called()
+
+
+def test_mem_status_posts_listener_status_without_search():
+    state = _make_state(allowed_channels={"C100", "C200"})
+    state.active_threads.add(("C100", "1.0"))
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C999",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "/mem status",
+    }
+
+    with patch("institutional_memory.listener.search_memory") as search_memory:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert "active threads: 1" in client.posted[0]["text"].lower()
+    assert "allowed channels: 2" in client.posted[0]["text"].lower()
+    search_memory.assert_not_called()
+
+
+def test_mem_ask_searches_command_args_as_explicit_command_any_channel():
+    state = _make_state(allowed_channels=set())
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C999",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "/mem ask what happened with ACME?",
+    }
+    hits = [{"score": 0.86, "text": "ACME asked for a redline.", "source": "company/corpus/acme.md"}]
+
+    with patch("institutional_memory.listener.search_memory", return_value=hits) as search_memory:
+        with patch(
+            "institutional_memory.listener.compose_slack_answer",
+            return_value="ACME context\n\nSources:\n1. acme.md",
+        ) as compose:
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    search_memory.assert_called_once()
+    assert search_memory.call_args.args[0] == "what happened with ACME?"
+    assert compose.call_args.kwargs["intent"] == "context"
+
+
+def test_mem_ask_no_hits_replies_no_context():
+    state = _make_state(allowed_channels=set())
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C999",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "/mem ask unknown topic",
+    }
+
+    with patch("institutional_memory.listener.search_memory", return_value=[]):
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert result["triggered_by"] == "command"
+    assert "didn't find anything" in client.posted[0]["text"].lower()
+
+
+def test_mem_precedent_forces_precedent_intent():
+    state = _make_state(allowed_channels=set())
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C999",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "/mem precedent vendor delay",
+    }
+    hits = [{"score": 0.82, "text": "Prior vendor delay", "source": "company/corpus/vendor.md"}]
+
+    with patch("institutional_memory.listener.search_memory", return_value=hits):
+        with patch(
+            "institutional_memory.listener.compose_slack_answer",
+            return_value="Closest precedent\n\nSources:\n1. vendor.md",
+        ) as compose:
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert compose.call_args.kwargs["intent"] == "precedent"
+
+
+def test_mem_source_alias_uses_recent_refs_without_search():
+    state = _make_state(allowed_channels=set())
+    state.thread_source_refs[("C999", "1.0")] = [
+        {"source": "company/corpus/q3.md", "text": "Retention strategy", "access": "share"}
+    ]
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C999",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "user": "U123",
+        "text": "/mem source 1",
+    }
+
+    with patch(
+        "institutional_memory.listener.render_source_command",
+        return_value={"status": "ok", "text": "Source 1: q3.md\n\n> Retention strategy"},
+    ):
+        with patch("institutional_memory.listener.search_memory") as search_memory:
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert "Retention strategy" in client.posted[0]["text"]
+    search_memory.assert_not_called()
+
+
+def test_mem_save_thread_promotes_current_thread():
+    state = _make_state(allowed_channels=set())
+    state.promotion_allowed_channels = {"C999"}
+    state.promotion_rate_limiter = PromotionRateLimiter()
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C999",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "user": "U123",
+        "text": "/mem save-thread",
+    }
+
+    with patch(
+        "institutional_memory.listener.promote_slack_thread_from_command",
+        return_value={"status": "promoted", "path": "company/corpus/slack/promoted/C999_1.0.md", "note": "ingest later"},
+    ) as promote:
+        with patch("institutional_memory.listener.search_memory") as search_memory:
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert "promoted" in client.posted[0]["text"].lower()
+    assert "company/corpus/slack/promoted/C999_1.0.md" in client.posted[0]["text"]
+    promote.assert_called_once()
+    search_memory.assert_not_called()
+
+
+def test_mem_sync_imports_current_channel_to_corpus():
+    state = _make_state(allowed_channels=set())
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C999",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "/mem sync current 5",
+    }
+
+    with patch(
+        "institutional_memory.listener.sync_slack_history",
+        return_value={"status": "ok", "mode": "corpus", "channel": "C999", "written": ["company/corpus/slack/C999_1.0.md"], "skipped": 0, "errors": []},
+    ) as sync:
+        with patch("institutional_memory.listener.search_memory") as search_memory:
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert "imported 1 thread" in client.posted[0]["text"].lower()
+    sync.assert_called_once()
+    assert sync.call_args.kwargs["channel"] == "C999"
+    assert sync.call_args.kwargs["limit"] == 5
+    search_memory.assert_not_called()
+
+
+def test_mem_demo_reset_requires_confirmation():
+    state = _make_state(allowed_channels=set())
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C999",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "/mem demo-reset",
+    }
+
+    with patch("institutional_memory.listener.reset_demo_state_from_command") as reset_demo:
+        with patch("institutional_memory.listener.search_memory") as search_memory:
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert "confirm" in client.posted[0]["text"].lower()
+    reset_demo.assert_not_called()
+    search_memory.assert_not_called()
+
+
+def test_mem_demo_reset_confirm_resets_state():
+    state = _make_state(allowed_channels=set())
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C999",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "/mem demo-reset confirm",
+    }
+
+    with patch(
+        "institutional_memory.listener.reset_demo_state_from_command",
+        return_value={"status": "reset", "clear_audit": True, "clear_chroma": True, "clear_slack_inbox": True},
+    ) as reset_demo:
+        with patch("institutional_memory.listener.search_memory") as search_memory:
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert "reset" in client.posted[0]["text"].lower()
+    reset_demo.assert_called_once()
+    search_memory.assert_not_called()
+
 
 
 def test_offer_footer_shown_once_and_sets_pending_offer():

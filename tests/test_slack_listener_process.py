@@ -17,11 +17,33 @@ class FakeWebClient:
     pass
 
 
+class FakeBuildStateWebClient:
+    def auth_test(self):
+        return {"user_id": "UBOT"}
+
+    def conversations_list(self, types, limit):
+        return [{"id": "C123", "name": "memory"}]
+
+
 def _request(event):
     return SimpleNamespace(
         type="events_api",
         envelope_id="env-123",
         payload={"event": event},
+    )
+
+
+def _slash_request(text):
+    return SimpleNamespace(
+        type="slash_commands",
+        envelope_id="env-123",
+        payload={
+            "command": "/mem",
+            "text": text,
+            "channel_id": "C123",
+            "user_id": "U123",
+            "trigger_id": "trigger-123",
+        },
     )
 
 
@@ -141,3 +163,43 @@ def test_reaction_added_creates_rate_limiter_when_state_omits_one(monkeypatch):
     assert len(client.responses) == 1
     assert isinstance(captured["rate_limiter"], PromotionRateLimiter)
     assert state.promotion_rate_limiter is captured["rate_limiter"]
+
+
+def test_build_state_uses_listener_channels_for_promotion_when_unset(monkeypatch):
+    monkeypatch.setattr(slack_listener, "LISTENER_CHANNELS", "C123")
+    monkeypatch.setattr(slack_listener, "SLACK_CHANNEL", "")
+    monkeypatch.setattr(slack_listener, "PROMOTION_ALLOWED_CHANNELS", "")
+
+    state = slack_listener._build_state(FakeBuildStateWebClient())
+
+    assert state.allowed_channels == {"C123"}
+    assert state.promotion_allowed_channels == {"C123"}
+
+
+def test_slash_commands_route_to_listener_without_ingestion(monkeypatch):
+    calls = []
+
+    def fake_handle_message_event(*args, **kwargs):
+        calls.append(("message", args, kwargs))
+        return {"status": "unexpected"}
+
+    def fake_handle_listener_event(received_event, client, state):
+        calls.append(("listener", received_event, client, state))
+        return {"status": "answered"}
+
+    monkeypatch.setattr(slack_listener, "handle_message_event", fake_handle_message_event)
+    monkeypatch.setattr(slack_listener, "handle_listener_event", fake_handle_listener_event)
+
+    client = FakeSocketClient()
+    web_client = FakeWebClient()
+    state = _state()
+
+    slack_listener.process(client, _slash_request("ask vendor clause"), web_client, state)
+
+    assert len(client.responses) == 1
+    assert [call[0] for call in calls] == ["listener"]
+    event = calls[0][1]
+    assert event["type"] == "message"
+    assert event["channel"] == "C123"
+    assert event["text"] == "/mem ask vendor clause"
+    assert event["user"] == "U123"
