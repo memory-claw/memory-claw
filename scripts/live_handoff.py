@@ -3,7 +3,7 @@ from __future__ import annotations
 
 STEPS = [
     "1. uv sync",
-    "2. cp .env.example .env and set SLACK_BOT_TOKEN plus SLACK_CHANNEL",
+    "2. cp -n .env.example .env, then edit .env and set real SLACK_BOT_TOKEN plus SLACK_CHANNEL",
     "3. ollama pull qwen3-embedding:8b",
     "4. ollama pull nemotron-3-super:120b",
     "5. uv run python scripts/dgx_check.py --skip-model-smoke --skip-backup-video",

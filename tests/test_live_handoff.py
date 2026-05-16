@@ -14,3 +14,4 @@ def test_handoff_names_final_gate_proof_artifacts():
     assert "non-empty" in text
     assert "no slack_sent" in text
     assert "ordered" in text
+    assert "cp -n .env.example .env" in text

@@ -20,12 +20,13 @@ After pulling this branch on ASUS:
 
 ```bash
 uv sync
+cp -n .env.example .env
 uv run python scripts/live_handoff.py
 ```
 
-Follow that printed sequence exactly. It covers model pulls, Slack secrets,
-OpenClaw setup, RFP success case, silent case, heartbeat proof, backup video,
-and final gate.
+Set real `SLACK_BOT_TOKEN` and `SLACK_CHANNEL` in `.env`, then follow the
+printed sequence exactly. It covers model pulls, Slack secrets, OpenClaw setup,
+RFP success case, silent case, heartbeat proof, backup video, and final gate.
 
 Final gate:
 
