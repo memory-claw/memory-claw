@@ -466,6 +466,53 @@ def test_handle_app_mention_event():
     assert result["status"] == "replied"
 
 
+def test_mention_advice_on_command_updates_thread_mode_without_search():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    client = MockWebClient()
+    event = {"type": "message", "channel": "C100", "ts": "2.0", "thread_ts": "1.0", "user": "U123", "text": "<@UBOT> advice on"}
+
+    with patch("institutional_memory.listener.search_memory") as search_memory:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert state.thread_advice_modes[("C100", "1.0")] == "on"
+    assert "advice mode is on" in client.posted[0]["text"].lower()
+    search_memory.assert_not_called()
+
+
+def test_short_yes_requires_pending_offer():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    client = MockWebClient()
+    event = {"type": "message", "channel": "C100", "ts": "2.0", "thread_ts": "1.0", "user": "U123", "text": "yes"}
+
+    with patch("institutional_memory.listener.search_memory", return_value=[]) as search_memory:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "skipped"
+    assert state.thread_advice_modes == {}
+    search_memory.assert_called_once()
+
+
+def test_short_yes_after_pending_offer_sets_advice_on_without_search():
+    state = _make_state()
+    state.active_threads.add(("C100", "1.0"))
+    state.thread_advice_offer_pending.add(("C100", "1.0"))
+    client = MockWebClient()
+    event = {"type": "message", "channel": "C100", "ts": "2.0", "thread_ts": "1.0", "user": "U123", "text": "yes"}
+
+    with patch("institutional_memory.listener.search_memory") as search_memory:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert state.thread_advice_modes[("C100", "1.0")] == "on"
+    search_memory.assert_not_called()
+
+
 def test_handle_search_failure_no_crash():
     state = _make_state()
     client = MockWebClient()

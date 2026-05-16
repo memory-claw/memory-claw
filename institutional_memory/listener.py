@@ -14,6 +14,10 @@ from institutional_memory.config import (
     THREAD_THRESHOLD,
     UNPROMPTED_THRESHOLD,
 )
+from institutional_memory.response_composer import (
+    detect_thread_advice_command,
+    should_accept_advice_offer,
+)
 from institutional_memory.search import search_memory
 
 
@@ -217,12 +221,44 @@ class ListenerState:
     allowed_channels: set[str]
     dedupe: DedupeSet
     active_threads: set[tuple[str, str]] = field(default_factory=set)
+    thread_advice_modes: dict[tuple[str, str], str] = field(default_factory=dict)
+    thread_footer_shown: set[tuple[str, str]] = field(default_factory=set)
+    thread_advice_offer_pending: set[tuple[str, str]] = field(default_factory=set)
+    thread_source_refs: dict[tuple[str, str], list[dict[str, Any]]] = field(default_factory=dict)
+    thread_full_source_cooldowns: dict[tuple[str, str, int], float] = field(default_factory=dict)
 
 
 def _is_mention(event: dict[str, Any], bot_user_id: str) -> bool:
     if event.get("type") == "app_mention":
         return True
     return f"<@{bot_user_id}>" in str(event.get("text", ""))
+
+
+def _thread_key(channel: str, thread_ts: str) -> tuple[str, str]:
+    return (channel, thread_ts)
+
+
+def _advice_mode_reply(mode: str) -> str:
+    return f"Advice mode is {mode} for this thread."
+
+
+def _handle_advice_mode_command(
+    text: str,
+    key: tuple[str, str],
+    state: ListenerState,
+) -> str | None:
+    mode = detect_thread_advice_command(text)
+    if mode is None:
+        mode = should_accept_advice_offer(
+            text,
+            pending_offer=key in state.thread_advice_offer_pending,
+        )
+    if mode is None:
+        return None
+
+    state.thread_advice_modes[key] = mode
+    state.thread_advice_offer_pending.discard(key)
+    return _advice_mode_reply(mode)
 
 
 def handle_listener_event(
@@ -234,18 +270,41 @@ def handle_listener_event(
     ts = str(event.get("ts", ""))
     thread_ts = event.get("thread_ts") or ts
 
-    if should_skip(event, state.bot_user_id):
+    is_mention = _is_mention(event, state.bot_user_id)
+    is_active_thread = _thread_key(channel, str(event.get("thread_ts", ""))) in state.active_threads
+    is_short_active_thread_reply = is_active_thread and len(str(event.get("text", "")).strip()) < 5
+
+    if should_skip(event, state.bot_user_id) and not is_short_active_thread_reply:
         return {"status": "skipped", "reason": "filtered"}
 
     if state.dedupe.seen(channel, ts):
         return {"status": "skipped", "reason": "dedupe"}
 
-    is_mention = _is_mention(event, state.bot_user_id)
-    is_active_thread = (channel, event.get("thread_ts", "")) in state.active_threads
-
     if not is_mention and not is_active_thread and channel not in state.allowed_channels:
         log_event("listener_skip", channel=channel, reason="not_in_allowlist")
         return {"status": "skipped", "reason": "not_in_allowlist"}
+
+    key = _thread_key(channel, str(thread_ts))
+    command_text = strip_mention(str(event.get("text", "")), state.bot_user_id)
+    advice_reply = _handle_advice_mode_command(command_text, key, state)
+    if advice_reply:
+        try:
+            client.chat_postMessage(channel=channel, text=advice_reply, thread_ts=thread_ts)
+            log_event(
+                "listener_reply",
+                channel=channel,
+                thread_ts=thread_ts,
+                query="",
+                top_score=0,
+                sources=[],
+                triggered_by="thread",
+                response_intent="toggle",
+                advice_mode=state.thread_advice_modes[key],
+            )
+            return {"status": "replied", "hits": 0, "triggered_by": "thread"}
+        except Exception as exc:
+            log_event("listener_error", channel=channel, error=str(exc))
+            return {"status": "error", "error": str(exc)}
 
     threshold = select_threshold(is_mention, is_active_thread)
     query = build_search_query(event, bot_user_id=state.bot_user_id, client=client)
