@@ -90,7 +90,7 @@ def resolve_channels(
     names_to_resolve: list[str] = []
 
     for entry in entries:
-        if entry.startswith("C") and not entry.startswith("#"):
+        if entry.startswith(("C", "G")) and not entry.startswith("#"):
             ids.add(entry)
         else:
             names_to_resolve.append(entry.lstrip("#"))

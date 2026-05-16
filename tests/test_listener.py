@@ -114,6 +114,12 @@ def test_resolve_channels_passes_through_ids():
     assert result == {"C123", "C456"}
 
 
+def test_resolve_channels_passes_through_private_channel_ids():
+    client = FakeWebClient([])
+    result = resolve_channels("G123,G456", fallback_channel="", client=client)
+    assert result == {"G123", "G456"}
+
+
 def test_resolve_channels_converts_names_to_ids():
     client = FakeWebClient([
         {"id": "C123", "name": "general"},
