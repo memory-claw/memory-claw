@@ -59,6 +59,20 @@ def test_readme_documents_slack_ingestion():
     assert "--clear-slack-inbox" in readme
 
 
+def test_readme_documents_slack_auto_promotion():
+    readme = Path("README.md").read_text(encoding="utf-8")
+
+    assert "### Slack Auto-Promotion" in readme
+    assert "PROMOTION_ALLOWED_CHANNELS" in readme
+    assert "reaction_added" in readme
+    assert "Event Subscriptions" in readme
+    assert ":memo:" in readme
+    assert ":brain:" in readme
+    assert "company/corpus/slack/promoted/" in readme
+    assert "company/evidence/slack/" in readme
+    assert "uv run python scripts/ingest_corpus.py --force" in readme
+
+
 def test_plan_names_current_repo_path():
     plan = Path("2026-05-15-institutional-memory-engine.md").read_text(encoding="utf-8")
 

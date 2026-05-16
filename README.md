@@ -220,6 +220,23 @@ Manual promotion copies a processed Slack inbox file into corpus:
 uv run python scripts/ingest_corpus.py --force
 ```
 
+### Slack Auto-Promotion
+
+Set `PROMOTION_ALLOWED_CHANNELS` to the comma-separated Slack channel IDs where
+reaction-based promotion is allowed. In the Slack app config, enable
+Event Subscriptions and subscribe to the `reaction_added` event so the listener
+can receive promotion reactions.
+
+React with `:memo:` or `:brain:` on an allowed Slack message/thread to promote
+it. Promoted corpus files are written under `company/corpus/slack/promoted/`,
+with evidence snapshots under `company/evidence/slack/`.
+
+After promotion, reingest the corpus:
+
+```bash
+uv run python scripts/ingest_corpus.py --force
+```
+
 For a clean Slack ingestion demo:
 
 ```bash
