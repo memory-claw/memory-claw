@@ -23,7 +23,7 @@ def test_deploy_script_uses_tailscale_and_ssh_key_without_password():
 def test_github_action_deploys_over_tailscale_without_password():
     workflow = Path(".github/workflows/deploy-asus.yml").read_text(encoding="utf-8")
 
-    assert "tailscale/github-action" in workflow
+    assert "tailscale/github-action@v4" in workflow
     assert "100.68.221.47" in workflow
     assert "ASUS_SSH_KEY" in workflow
     assert "scripts/deploy_asus.sh" in workflow
