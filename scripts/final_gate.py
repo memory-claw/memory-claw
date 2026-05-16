@@ -42,6 +42,22 @@ def run(command: list[str], timeout: int = 180) -> dict:
         return {"command": command, "ok": False, "error": f"timeout after {timeout}s"}
 
 
+def _find_index(events: list[dict], start: int, **fields: str) -> int | None:
+    for index, event in enumerate(events[start:], start=start):
+        if all(event.get(key) == value for key, value in fields.items()):
+            return index
+    return None
+
+
+def _has_sent_slack(events: list[dict], start: int, end: int) -> bool:
+    return any(
+        event.get("type") == "slack_sent"
+        and event.get("driver") == "openclaw"
+        and event.get("status") == "sent"
+        for event in events[start:end]
+    )
+
+
 def audit_blockers(audit_text: str | None = None) -> list[str]:
     if audit_text is None and not AUDIT_LOG.exists():
         return ["audit_log.jsonl missing"]
@@ -73,6 +89,20 @@ def audit_blockers(audit_text: str | None = None) -> list[str]:
         blockers.append("missing success processed proof")
     if "skipped_no_relevant_memory" not in processed_statuses:
         blockers.append("missing silent-case processed proof")
+    if not any(
+        event.get("type") == "draft_read"
+        and event.get("driver") == "openclaw"
+        and event.get("path") == RFP_DRAFT
+        for event in events
+    ):
+        blockers.append("missing RFP draft_read proof")
+    if not any(
+        event.get("type") == "draft_read"
+        and event.get("driver") == "openclaw"
+        and event.get("path") == SILENT_DRAFT
+        for event in events
+    ):
+        blockers.append("missing silent draft_read proof")
     if not any(
         event.get("type") == "processed"
         and event.get("driver") == "openclaw"
@@ -126,6 +156,26 @@ def audit_blockers(audit_text: str | None = None) -> list[str]:
         for event in events
     ):
         blockers.append("missing Slack source attribution proof")
+    silent_read_index = _find_index(
+        events,
+        0,
+        type="draft_read",
+        driver="openclaw",
+        path=SILENT_DRAFT,
+    )
+    if silent_read_index is not None:
+        silent_processed_index = _find_index(
+            events,
+            silent_read_index + 1,
+            type="processed",
+            driver="openclaw",
+            path=SILENT_DRAFT,
+            status="skipped_no_relevant_memory",
+        )
+        if silent_processed_index is None:
+            blockers.append("missing ordered silent processed proof")
+        elif _has_sent_slack(events, silent_read_index + 1, silent_processed_index):
+            blockers.append("silent case posted Slack")
     for event in events:
         if event.get("type") in required and event.get("driver") != "openclaw":
             blockers.append(f"non-openclaw proof for {event.get('type')}: {event.get('driver')}")
