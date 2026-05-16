@@ -12,6 +12,7 @@ def test_deploy_script_uses_tailscale_and_ssh_key_without_password():
     assert "BatchMode=yes" in script
     assert "StrictHostKeyChecking=accept-new" in script
     assert "ASUS_BRANCH" in script
+    assert "PATH=\\$HOME/.local/bin:\\$PATH" in script
     assert "git fetch origin" in script
     assert "git checkout -B" in script
     assert ".openclaw/workspace" in script
