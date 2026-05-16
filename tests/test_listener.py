@@ -171,14 +171,32 @@ def test_strip_mention_multiple():
 class FakeRepliesClient:
     def __init__(self, replies):
         self._replies = replies
+        self.calls = []
 
-    def conversations_replies(self, channel, ts, limit):
-        return {"messages": self._replies}
+    def conversations_replies(self, channel, ts, limit, cursor=None):
+        self.calls.append({"channel": channel, "ts": ts, "limit": limit, "cursor": cursor})
+        return {"messages": self._replies[:limit]}
 
 
 class FakeFailingRepliesClient:
     def conversations_replies(self, channel, ts, limit):
         raise Exception("API error")
+
+
+class FakePaginatedRepliesClient:
+    def __init__(self, pages):
+        self._pages = pages
+        self.calls = []
+
+    def conversations_replies(self, channel, ts, limit, cursor=None):
+        self.calls.append({"channel": channel, "ts": ts, "limit": limit, "cursor": cursor})
+        page_index = int(cursor or 0)
+        next_index = page_index + 1
+        next_cursor = str(next_index) if next_index < len(self._pages) else ""
+        return {
+            "messages": self._pages[page_index],
+            "response_metadata": {"next_cursor": next_cursor},
+        }
 
 
 def test_query_top_level_strips_mention():
@@ -237,6 +255,22 @@ def test_thread_context_prefers_recent_human_messages():
 
     assert "message 0" not in context
     assert "message 11" in context
+
+
+def test_thread_context_paginates_before_selecting_recent_messages():
+    event = {"channel": "C123", "text": "latest?", "ts": "2.0", "thread_ts": "1.0"}
+    client = FakePaginatedRepliesClient(
+        [
+            [{"user": "U123", "text": f"old {i}"} for i in range(100)],
+            [{"user": "U123", "text": f"recent {i}"} for i in range(12)],
+        ]
+    )
+
+    context = build_thread_context(event, bot_user_id="U999", client=client)
+
+    assert "old 99" not in context
+    assert "recent 11" in context
+    assert client.calls[1]["cursor"] == "1"
 
 
 def test_thread_context_caps_at_2000_chars_and_filters_bots():

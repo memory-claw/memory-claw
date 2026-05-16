@@ -104,6 +104,10 @@ def _is_bot_message(message: dict[str, Any], bot_user_id: str) -> bool:
     return bool(message.get("bot_id") or message.get("user") == bot_user_id)
 
 
+THREAD_CONTEXT_FETCH_LIMIT = 100
+THREAD_CONTEXT_MAX_PAGES = 5
+
+
 def build_thread_context(
     event: dict[str, Any],
     bot_user_id: str,
@@ -116,11 +120,22 @@ def build_thread_context(
     if not thread_ts or client is None:
         return ""
 
+    messages: list[dict[str, Any]] = []
+    cursor: str | None = None
     try:
-        response = client.conversations_replies(
-            channel=event["channel"], ts=thread_ts, limit=limit
-        )
-        messages = response.get("messages", [])
+        for _ in range(THREAD_CONTEXT_MAX_PAGES):
+            kwargs = {
+                "channel": event["channel"],
+                "ts": thread_ts,
+                "limit": max(limit, THREAD_CONTEXT_FETCH_LIMIT),
+            }
+            if cursor:
+                kwargs["cursor"] = cursor
+            response = client.conversations_replies(**kwargs)
+            messages.extend(response.get("messages", []))
+            cursor = (response.get("response_metadata") or {}).get("next_cursor") or None
+            if not cursor:
+                break
     except Exception:
         return ""
 
