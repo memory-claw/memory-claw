@@ -48,3 +48,9 @@ def test_slack_secret_check_rejects_example_token():
 
 def test_slack_secret_check_accepts_configured_values():
     assert dgx_check.slack_secret_blockers("xoxb-real-looking-token", "#institutional-memory") == []
+
+
+def test_slack_secret_check_requires_explicit_channel():
+    assert dgx_check.slack_secret_blockers("xoxb-real-looking-token") == [
+        "SLACK_CHANNEL missing"
+    ]
