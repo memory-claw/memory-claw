@@ -60,6 +60,39 @@
     }
     .draft-body h1, .draft-body h2, .draft-body h3 { margin: 10px 0 6px; font-size: 14px; }
     .draft-body p { margin: 6px 0; }
+    .draft-body-expand { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+    .draft-body-preview {
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--text);
+      white-space: pre-wrap;
+    }
+    .draft-body-full-wrap {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 300ms ease;
+    }
+    .draft-body-expand.is-expanded .draft-body-preview { display: none; }
+    .draft-body-full {
+      font-size: 12px;
+      line-height: 1.55;
+      padding-top: 0;
+    }
+    .draft-body-full h1, .draft-body-full h2, .draft-body-full h3 { margin: 10px 0 6px; font-size: 14px; }
+    .draft-body-full p { margin: 6px 0; }
+    .body-toggle {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 0;
+      border: none;
+      background: none;
+      font-family: var(--font);
+      font-size: 12px;
+      color: var(--teal);
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .body-toggle:hover { text-decoration: underline; }
     .decision { font-size: 12px; }
     .decision h4 {
       font-size: 10px;
@@ -112,6 +145,60 @@
       return parts[parts.length - 1];
     }
 
+    function stripHtml(html) {
+      const d = document.createElement("div");
+      d.innerHTML = html || "";
+      return (d.textContent || "").replace(/\s+/g, " ").trim();
+    }
+
+    function truncatePlain(plain, maxLen) {
+      if (plain.length <= maxLen) {
+        return { preview: plain, needsToggle: false };
+      }
+      let cut = plain.slice(0, maxLen);
+      const lastSpace = cut.lastIndexOf(" ");
+      if (lastSpace > 40) cut = cut.slice(0, lastSpace);
+      return { preview: cut.trimEnd() + "…", needsToggle: true };
+    }
+
+    function renderBody(d) {
+      const html = d.body_html || "";
+      const markdown = d.body_markdown || "";
+      const plain = stripHtml(html) || markdown.replace(/\s+/g, " ").trim();
+      const { preview, needsToggle } = truncatePlain(plain, 300);
+
+      if (!needsToggle) {
+        return `<div class="draft-body">${html || esc(markdown)}</div>`;
+      }
+
+      return `<div class="draft-body-expand" data-path="${esc(d.path)}">
+        <div class="draft-body-preview">${esc(preview)}</div>
+        <div class="draft-body-full-wrap">
+          <div class="draft-body-full">${html || esc(markdown)}</div>
+        </div>
+        <button type="button" class="body-toggle" aria-expanded="false">See more</button>
+      </div>`;
+    }
+
+    function bindBodyToggles(root) {
+      root.querySelectorAll(".draft-body-expand").forEach((block) => {
+        const btn = block.querySelector(".body-toggle");
+        const fullWrap = block.querySelector(".draft-body-full-wrap");
+        if (!btn || !fullWrap) return;
+
+        btn.addEventListener("click", () => {
+          const expanded = block.classList.toggle("is-expanded");
+          btn.setAttribute("aria-expanded", expanded ? "true" : "false");
+          btn.textContent = expanded ? "See less" : "See more";
+          if (expanded) {
+            fullWrap.style.maxHeight = fullWrap.scrollHeight + "px";
+          } else {
+            fullWrap.style.maxHeight = "0px";
+          }
+        });
+      });
+    }
+
     function renderDraft(d) {
       const pills = [];
       if (d.matched_source) pills.push(`<span class="pill">${esc(basename(d.matched_source))}</span>`);
@@ -141,7 +228,7 @@
           </div>
           <span class="badge ${esc(d.status)}">${esc(d.status)}</span>
         </div>
-        <div class="draft-body">${d.body_html || esc(d.body_markdown || "")}</div>
+        ${renderBody(d)}
         ${slackMeta ? `<div class="decision"><h4>slack source</h4>${slackMeta}</div>` : ""}
         <div class="decision">
           <h4>bot decision</h4>
@@ -162,6 +249,7 @@
           return;
         }
         el.innerHTML = items.map(renderDraft).join("");
+        bindBodyToggles(el);
         if (location.hash) {
           const target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
           if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
