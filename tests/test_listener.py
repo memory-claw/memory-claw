@@ -12,9 +12,11 @@ from institutional_memory.listener import (
     format_reply,
     handle_listener_event,
     load_persisted_promotion_channels,
+    load_persisted_source_refs,
     parse_mem_command,
     resolve_channels,
     save_persisted_promotion_channels,
+    save_persisted_source_refs,
     select_threshold,
     should_skip,
     strip_mention,
@@ -639,6 +641,53 @@ def test_mem_source_alias_uses_recent_refs_without_search():
     search_memory.assert_not_called()
 
 
+def test_show_source_recovers_refs_from_runtime_store(tmp_path, monkeypatch):
+    source_refs_path = tmp_path / "thread_sources.json"
+    monkeypatch.setattr("institutional_memory.listener.SOURCE_REFS_PATH", source_refs_path)
+    key = ("C999", "1.0")
+    save_persisted_source_refs({
+        key: [
+            {"source": "company/corpus/q3.md", "text": "Retention strategy", "access": "share"}
+        ]
+    })
+    state = _make_state(allowed_channels=set())
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C999",
+        "ts": "2.0",
+        "thread_ts": "1.0",
+        "user": "U123",
+        "text": "show source 1",
+    }
+
+    with patch(
+        "institutional_memory.listener.render_source_command",
+        return_value={"status": "ok", "text": "Source 1: q3.md\n\n> Retention strategy"},
+    ):
+        with patch("institutional_memory.listener.search_memory") as search_memory:
+            with patch("institutional_memory.listener.log_event"):
+                result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert "Retention strategy" in client.posted[0]["text"]
+    assert state.thread_source_refs[key][0]["source"] == "company/corpus/q3.md"
+    search_memory.assert_not_called()
+
+
+def test_persisted_source_refs_round_trip(tmp_path, monkeypatch):
+    source_refs_path = tmp_path / "thread_sources.json"
+    monkeypatch.setattr("institutional_memory.listener.SOURCE_REFS_PATH", source_refs_path)
+    refs = {
+        ("C222", "2.0"): [{"source": "company/corpus/two.md", "text": "Two", "access": "share"}],
+        ("C111", "1.0"): [{"source": "company/corpus/one.md", "text": "One", "access": "excerpt"}],
+    }
+
+    save_persisted_source_refs(refs)
+
+    assert load_persisted_source_refs() == refs
+
+
 def test_mem_save_thread_promotes_current_thread():
     state = _make_state(allowed_channels=set())
     state.promotion_allowed_channels = {"C999"}
@@ -1140,7 +1189,8 @@ def test_show_source_uses_recent_thread_refs_without_search():
     search_memory.assert_not_called()
 
 
-def test_show_source_without_recent_refs_replies_missing():
+def test_show_source_without_recent_refs_replies_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr("institutional_memory.listener.SOURCE_REFS_PATH", tmp_path / "missing_refs.json")
     state = _make_state()
     state.active_threads.add(("C100", "1.0"))
     client = MockWebClient()

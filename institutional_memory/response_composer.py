@@ -73,7 +73,7 @@ def compose_fallback_answer(
     if resolved_intent == "precedent":
         sections.append(_precedent_section(visible_hits))
     if resolved_intent == "advice" or advice_mode == "on":
-        sections.append(_advice_section())
+        sections.append(_advice_section(visible_hits))
 
     sections.append(_sources_section(visible_hits))
     if include_footer:
@@ -157,11 +157,33 @@ def _precedent_section(hits: list[dict[str, Any]]) -> str:
     )
 
 
-def _advice_section() -> str:
-    return (
-        "Suggested next move:\n"
-        "- Confirm the current facts against the cited memory, then review the closest source before posting a final answer."
-    )
+def _advice_section(hits: list[dict[str, Any]]) -> str:
+    actions = _advice_actions(hits)
+    if not actions:
+        actions = [
+            "Confirm the current facts against the cited memory before posting a final answer."
+        ]
+    return "Suggested next move:\n" + "\n".join(f"- {action}" for action in actions[:3])
+
+
+def _advice_actions(hits: list[dict[str, Any]]) -> list[str]:
+    if not hits:
+        return []
+    text = " ".join(str(hit.get("text", "")) for hit in hits[:2]).lower()
+    actions: list[str] = []
+
+    if "analytics repo" in text or "repo access" in text:
+        actions.append("Request analytics repo access before assigning first work.")
+    if ".env" in text or "env file" in text:
+        actions.append("Share required `.env` values through the approved secret path, not Slack.")
+    if "secret" in text:
+        actions.append("Do not paste secrets in Slack; use the approved secret manager or secure handoff.")
+    if "laptop" in text or "configured" in text:
+        actions.append("Confirm laptop and local dev setup before the first ticket.")
+    if "alex" in text:
+        actions.append("Ask Alex to provide the missing setup materials or owner handoff.")
+
+    return _dedupe(actions)
 
 
 def _sources_section(hits: list[dict[str, Any]]) -> str:
@@ -316,6 +338,17 @@ def _join_english(items: list[str]) -> str:
     if len(items) == 2:
         return f"{items[0]} or {items[1]}"
     return ", ".join(items[:-1]) + f", or {items[-1]}"
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
 
 
 def _normalize(text: str) -> str:

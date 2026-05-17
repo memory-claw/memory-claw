@@ -92,11 +92,28 @@ def test_compose_fallback_answer_uses_cite_only_wording_for_empty_text():
     assert "policy.md is relevant, but policy only allows citation." in answer
 
 
-def test_fallback_advice_includes_next_move_and_review_language():
-    answer = compose_fallback_answer("What should we do?", [_hit()], intent="advice")
+def test_fallback_advice_uses_memory_specific_actions():
+    answer = compose_fallback_answer(
+        "Can you get the contractor set up?",
+        [
+            _hit(
+                source="company/corpus/New_Engineer_Setup_Notes_Draft.md",
+                display_name="New_Engineer_Setup_Notes_Draft.md",
+                text=(
+                    "New engineer setup notes: get laptop configured, ask Alex for "
+                    "the .env file, request analytics repo access, and avoid sharing "
+                    "secrets in Slack."
+                ),
+            )
+        ],
+        intent="advice",
+    )
 
     assert "Suggested next move" in answer
-    assert "confirm" in answer.lower() or "review" in answer.lower()
+    assert "analytics repo access" in answer
+    assert ".env" in answer
+    assert "secrets in Slack" in answer
+    assert "Confirm the current facts" not in answer
 
 
 def test_fallback_precedent_includes_precedent_shape():

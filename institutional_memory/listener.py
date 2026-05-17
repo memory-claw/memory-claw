@@ -201,6 +201,7 @@ def build_search_query(
 MAX_HITS = 3
 MAX_SNIPPET_CHARS = 150
 PROMOTION_CHANNELS_PATH = RUNTIME_PATH / "promotion_channels.json"
+SOURCE_REFS_PATH = RUNTIME_PATH / "thread_sources.json"
 
 
 @dataclass(frozen=True)
@@ -385,6 +386,39 @@ def save_persisted_promotion_channels(channels: set[str]) -> None:
     )
 
 
+def load_persisted_source_refs() -> dict[tuple[str, str], list[dict[str, Any]]]:
+    if not SOURCE_REFS_PATH.exists():
+        return {}
+    try:
+        data = json.loads(SOURCE_REFS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+
+    refs: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for raw_key, raw_refs in data.items():
+        if not isinstance(raw_key, str) or "\t" not in raw_key or not isinstance(raw_refs, list):
+            continue
+        channel, thread_ts = raw_key.split("\t", 1)
+        cleaned_refs = [ref for ref in raw_refs if isinstance(ref, dict)]
+        if channel and thread_ts and cleaned_refs:
+            refs[(channel, thread_ts)] = cleaned_refs[:MAX_HITS]
+    return refs
+
+
+def save_persisted_source_refs(refs: dict[tuple[str, str], list[dict[str, Any]]]) -> None:
+    SOURCE_REFS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        f"{channel}\t{thread_ts}": refs_for_thread[:MAX_HITS]
+        for (channel, thread_ts), refs_for_thread in sorted(refs.items())
+    }
+    SOURCE_REFS_PATH.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
 def reset_demo_state_from_command() -> dict[str, Any]:
     RUNTIME_PATH.mkdir(parents=True, exist_ok=True)
     for child in RUNTIME_PATH.iterdir():
@@ -510,6 +544,11 @@ def _handle_source_command(
 
     refs = state.thread_source_refs.get(key)
     if not refs:
+        persisted_refs = load_persisted_source_refs()
+        refs = persisted_refs.get(key)
+        if refs:
+            state.thread_source_refs[key] = refs
+    if not refs:
         return ("I do not have a recent source list for this thread.", None)
 
     cooldown_key = None
@@ -557,7 +596,8 @@ def handle_listener_event(
     is_short_active_thread_reply = is_active_thread and len(str(event.get("text", "")).strip()) < 5
     command_text = strip_mention(str(event.get("text", "")), state.bot_user_id)
     mem_command = parse_mem_command(command_text)
-    is_explicit_command = mem_command is not None
+    is_source_command = parse_source_command(command_text) is not None
+    is_explicit_command = mem_command is not None or is_source_command
 
     if event.get("bot_id") or event.get("user") == state.bot_user_id or event.get("subtype"):
         return {"status": "skipped", "reason": "filtered"}
@@ -821,6 +861,12 @@ def handle_listener_event(
     if thread_ts:
         state.active_threads.add((channel, str(thread_ts)))
     state.thread_source_refs[key] = visible_hits[:MAX_HITS]
+    try:
+        persisted_refs = load_persisted_source_refs()
+        persisted_refs[key] = visible_hits[:MAX_HITS]
+        save_persisted_source_refs(persisted_refs)
+    except OSError as exc:
+        log_event("listener_source_refs_persist_failed", channel=channel, thread_ts=thread_ts, error=str(exc))
     if include_footer:
         state.thread_footer_shown.add(key)
         state.thread_footer_signatures[key] = footer_signature
