@@ -125,6 +125,8 @@ def test_approved_reaction_writes_memory_card_and_evidence(tmp_path, monkeypatch
     )
 
     assert result["status"] == "promoted"
+    assert result["channel"] == "C123"
+    assert result["thread_ts"] == "1710000000.000000"
     card = company_corpus / "slack" / "promoted" / "C123_1710000000.000000.md"
     evidence = company_evidence / "slack" / "C123_1710000000.000000.json"
     assert card.exists()
@@ -192,6 +194,8 @@ def test_existing_card_returns_exists_without_rewrite(tmp_path, monkeypatch):
     )
 
     assert result["status"] == "exists"
+    assert result["channel"] == "C123"
+    assert result["thread_ts"] == "1710000000.000000"
     assert card.read_text(encoding="utf-8") == "original"
 
 

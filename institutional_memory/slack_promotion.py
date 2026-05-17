@@ -308,8 +308,15 @@ def handle_reaction_event(
     card_rel = str(card_path.relative_to(PROJECT_ROOT))
     evidence_rel = str(evidence_path.relative_to(PROJECT_ROOT))
     if card_path.exists():
-        result = {"status": "exists", "path": card_rel, "evidence": evidence_rel, "note": INGEST_REMINDER}
-        log_event("slack_thread_auto_promoted", **result, channel=channel, thread_ts=thread_ts, promoted_by=user, reaction=reaction)
+        result = {
+            "status": "exists",
+            "channel": channel,
+            "thread_ts": thread_ts,
+            "path": card_rel,
+            "evidence": evidence_rel,
+            "note": INGEST_REMINDER,
+        }
+        log_event("slack_thread_auto_promoted", **result, promoted_by=user, reaction=reaction)
         return result
 
     allowed, reason = rate_limiter.allow(user)
@@ -356,6 +363,8 @@ def handle_reaction_event(
 
     result: dict[str, Any] = {
         "status": "promoted",
+        "channel": channel,
+        "thread_ts": thread_ts,
         "path": card_rel,
         "evidence": evidence_rel,
         "note": INGEST_REMINDER,
@@ -366,8 +375,6 @@ def handle_reaction_event(
     log_event(
         "slack_thread_auto_promoted",
         **result,
-        channel=channel,
-        thread_ts=thread_ts,
         promoted_by=user,
         reaction=reaction,
     )
