@@ -116,6 +116,31 @@ def test_fallback_advice_uses_memory_specific_actions():
     assert "Confirm the current facts" not in answer
 
 
+def test_fallback_advice_uses_rfp_liability_actions():
+    answer = compose_fallback_answer(
+        "Can we use a 10% liability cap for this NHS bid?",
+        [
+            _hit(
+                source="company/corpus/2023_rfp_postmortem.txt",
+                display_name="2023_rfp_postmortem.txt",
+                score=0.68,
+                text=(
+                    "The Meridian bid was lost after review focused on liability caps "
+                    "in clause 7.4, indemnification language, ambiguity in the "
+                    "risk-sharing framework, and missing fallback language."
+                ),
+            )
+        ],
+        intent="advice",
+    )
+
+    assert "Suggested next move" in answer
+    assert "Do not submit the 10% liability cap unchanged" in answer
+    assert "fallback language" in answer
+    assert "legal and sales" in answer
+    assert "Confirm the current facts" not in answer
+
+
 def test_fallback_precedent_includes_precedent_shape():
     answer = compose_fallback_answer("Compare this to precedent", [_hit()], intent="precedent")
 

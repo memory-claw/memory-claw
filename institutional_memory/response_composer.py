@@ -182,6 +182,12 @@ def _advice_actions(hits: list[dict[str, Any]]) -> list[str]:
         actions.append("Confirm laptop and local dev setup before the first ticket.")
     if "alex" in text:
         actions.append("Ask Alex to provide the missing setup materials or owner handoff.")
+    if "liability cap" in text or "liability caps" in text:
+        actions.append("Do not submit the 10% liability cap unchanged; treat the Meridian loss as a procurement risk.")
+    if "indemnification" in text or "risk-sharing" in text:
+        actions.append("Have legal and sales align on indemnification, liability caps, and risk-sharing before submission.")
+    if "clause 7.4" in text or "fallback language" in text:
+        actions.append("Add fallback language and a concise clause 7.4 explanation showing why the posture protects both sides.")
 
     return _dedupe(actions)
 
