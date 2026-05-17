@@ -14,7 +14,12 @@ class FakeSocketClient:
 
 
 class FakeWebClient:
-    pass
+    def __init__(self):
+        self.posted = []
+
+    def chat_postMessage(self, **kwargs):
+        self.posted.append(kwargs)
+        return {"ok": True}
 
 
 class FakeBuildStateWebClient:
@@ -98,6 +103,42 @@ def test_reaction_added_routes_to_promotion_without_message_or_listener(monkeypa
         "rate_limiter": state.promotion_rate_limiter,
         "bot_user_id": state.bot_user_id,
     }
+    assert web_client.posted == []
+
+
+def test_reaction_added_posts_confirmation_when_promoted(monkeypatch):
+    event = {
+        "type": "reaction_added",
+        "reaction": "brain",
+        "user": "U123",
+        "item": {"type": "message", "channel": "C123", "ts": "1710000000.000000"},
+    }
+
+    def fake_handle_reaction_event(**kwargs):
+        return {
+            "status": "promoted",
+            "channel": "C123",
+            "thread_ts": "1710000000.000000",
+            "path": "company/corpus/slack/promoted/C123_1710000000.000000.md",
+            "note": "run uv run python scripts/ingest_corpus.py --force to make promoted Slack memory searchable",
+        }
+
+    monkeypatch.setattr(slack_listener, "handle_reaction_event", fake_handle_reaction_event)
+    monkeypatch.setattr(slack_listener, "log_event", lambda *args, **kwargs: None)
+
+    client = FakeSocketClient()
+    web_client = FakeWebClient()
+    state = _state()
+
+    slack_listener.process(client, _request(event), web_client, state)
+
+    assert len(web_client.posted) == 1
+    assert web_client.posted[0]["channel"] == "C123"
+    assert web_client.posted[0]["thread_ts"] == "1710000000.000000"
+    assert "saved to corpus" in web_client.posted[0]["text"].lower()
+    assert "company/corpus/slack/promoted/C123_1710000000.000000.md" in web_client.posted[0]["text"]
+    assert "uv run" not in web_client.posted[0]["text"]
+    assert "after next ingest" in web_client.posted[0]["text"].lower()
 
 
 def test_non_reaction_events_keep_message_then_listener_flow(monkeypatch):
@@ -174,6 +215,18 @@ def test_build_state_uses_listener_channels_for_promotion_when_unset(monkeypatch
 
     assert state.allowed_channels == {"C123"}
     assert state.promotion_allowed_channels == {"C123"}
+
+
+def test_build_state_merges_persisted_promotion_channels(monkeypatch):
+    monkeypatch.setattr(slack_listener, "LISTENER_CHANNELS", "C123")
+    monkeypatch.setattr(slack_listener, "SLACK_CHANNEL", "")
+    monkeypatch.setattr(slack_listener, "PROMOTION_ALLOWED_CHANNELS", "C456")
+    monkeypatch.setattr(slack_listener, "load_persisted_promotion_channels", lambda: {"C789"})
+
+    state = slack_listener._build_state(FakeBuildStateWebClient())
+
+    assert state.allowed_channels == {"C123"}
+    assert state.promotion_allowed_channels == {"C456", "C789"}
 
 
 def test_slash_commands_route_to_listener_without_ingestion(monkeypatch):

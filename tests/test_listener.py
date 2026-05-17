@@ -11,8 +11,10 @@ from institutional_memory.listener import (
     format_no_hits_reply,
     format_reply,
     handle_listener_event,
+    load_persisted_promotion_channels,
     parse_mem_command,
     resolve_channels,
+    save_persisted_promotion_channels,
     select_threshold,
     should_skip,
     strip_mention,
@@ -376,6 +378,14 @@ def test_parse_mem_command_source_alias():
     assert command.args == "show full source 2"
 
 
+def test_parse_mem_command_allow_promote_here():
+    command = parse_mem_command("/mem allow-promote-here")
+
+    assert command is not None
+    assert command.kind == "allow-promote-here"
+    assert command.args == ""
+
+
 # --- Task 5: Main handler ---
 
 
@@ -485,6 +495,7 @@ def test_mem_help_posts_commands_without_search():
 
     assert result["status"] == "replied"
     assert "/mem ask" in client.posted[0]["text"]
+    assert "/mem allow-promote-here" in client.posted[0]["text"]
     search_memory.assert_not_called()
 
 
@@ -655,6 +666,40 @@ def test_mem_save_thread_promotes_current_thread():
     assert "company/corpus/slack/promoted/C999_1.0.md" in client.posted[0]["text"]
     promote.assert_called_once()
     search_memory.assert_not_called()
+
+
+def test_mem_allow_promote_here_updates_state_and_persists_channel(tmp_path, monkeypatch):
+    promotion_path = tmp_path / "promotion_channels.json"
+    monkeypatch.setattr("institutional_memory.listener.PROMOTION_CHANNELS_PATH", promotion_path)
+    state = _make_state(allowed_channels=set())
+    client = MockWebClient()
+    event = {
+        "type": "message",
+        "channel": "C999",
+        "ts": "1.0",
+        "user": "U123",
+        "text": "/mem allow-promote-here",
+    }
+
+    with patch("institutional_memory.listener.search_memory") as search_memory:
+        with patch("institutional_memory.listener.log_event"):
+            result = handle_listener_event(event, client, state)
+
+    assert result["status"] == "replied"
+    assert "promotion enabled" in client.posted[0]["text"].lower()
+    assert state.promotion_allowed_channels == {"C999"}
+    assert load_persisted_promotion_channels() == {"C999"}
+    search_memory.assert_not_called()
+
+
+def test_persisted_promotion_channels_round_trip(tmp_path, monkeypatch):
+    promotion_path = tmp_path / "promotion_channels.json"
+    monkeypatch.setattr("institutional_memory.listener.PROMOTION_CHANNELS_PATH", promotion_path)
+
+    save_persisted_promotion_channels({"C222", "C111"})
+
+    assert promotion_path.read_text(encoding="utf-8") == '{\n  "channels": [\n    "C111",\n    "C222"\n  ]\n}\n'
+    assert load_persisted_promotion_channels() == {"C111", "C222"}
 
 
 def test_mem_sync_imports_current_channel_to_corpus():

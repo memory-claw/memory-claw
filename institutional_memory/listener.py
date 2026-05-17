@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import time
@@ -199,6 +200,7 @@ def build_search_query(
 
 MAX_HITS = 3
 MAX_SNIPPET_CHARS = 150
+PROMOTION_CHANNELS_PATH = RUNTIME_PATH / "promotion_channels.json"
 
 
 @dataclass(frozen=True)
@@ -237,6 +239,7 @@ def parse_mem_command(text: str) -> MemCommand | None:
         "status": "status",
         "save-thread": "save-thread",
         "save": "save-thread",
+        "allow-promote-here": "allow-promote-here",
         "sync": "sync",
         "demo-reset": "demo-reset",
     }
@@ -293,6 +296,7 @@ def _format_mem_help() -> str:
             "- /mem source <n>",
             "- /mem full-source <n>",
             "- /mem save-thread",
+            "- /mem allow-promote-here",
             "- /mem sync current <limit>",
             "- /mem status",
             "- /mem demo-reset confirm",
@@ -330,6 +334,13 @@ def _format_promotion_result(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_allow_promote_here(channel: str) -> str:
+    return (
+        f"Promotion enabled here ({channel}). "
+        "React with :brain: to save threads to corpus."
+    )
+
+
 def _format_sync_result(result: dict[str, Any]) -> str:
     written = result.get("written") or []
     count = len(written) if isinstance(written, list) else 0
@@ -351,6 +362,26 @@ def _format_reset_result(result: dict[str, Any]) -> str:
         f"\n- clear audit: {result.get('clear_audit')}"
         f"\n- clear chroma: {result.get('clear_chroma')}"
         f"\n- clear slack inbox: {result.get('clear_slack_inbox')}"
+    )
+
+
+def load_persisted_promotion_channels() -> set[str]:
+    if not PROMOTION_CHANNELS_PATH.exists():
+        return set()
+    try:
+        data = json.loads(PROMOTION_CHANNELS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    channels = data.get("channels") if isinstance(data, dict) else []
+    return {str(channel) for channel in channels if str(channel).startswith(("C", "G"))}
+
+
+def save_persisted_promotion_channels(channels: set[str]) -> None:
+    PROMOTION_CHANNELS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"channels": sorted(channels)}
+    PROMOTION_CHANNELS_PATH.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
     )
 
 
@@ -570,7 +601,7 @@ def handle_listener_event(
             if state.promotion_rate_limiter is None:
                 state.promotion_rate_limiter = PromotionRateLimiter()
             synthetic_event = {
-                "reaction": "memo",
+                "reaction": "brain",
                 "user": event.get("user"),
                 "item": {"type": "message", "channel": channel, "ts": str(thread_ts or ts)},
             }
@@ -584,6 +615,17 @@ def handle_listener_event(
                 )
                 _post_reply(client, channel, thread_ts, _format_promotion_result(result))
                 log_event("listener_reply", channel=channel, thread_ts=thread_ts, query="", top_score=0, sources=[], triggered_by="command", response_intent="save-thread")
+                return {"status": "replied", "hits": 0, "triggered_by": "command"}
+            except Exception as exc:
+                log_event("listener_error", channel=channel, error=str(exc))
+                return {"status": "error", "error": str(exc)}
+
+        if mem_command.kind == "allow-promote-here":
+            state.promotion_allowed_channels.add(channel)
+            try:
+                save_persisted_promotion_channels(state.promotion_allowed_channels)
+                _post_reply(client, channel, thread_ts, _format_allow_promote_here(channel))
+                log_event("listener_reply", channel=channel, thread_ts=thread_ts, query="", top_score=0, sources=[], triggered_by="command", response_intent="allow-promote-here")
                 return {"status": "replied", "hits": 0, "triggered_by": "command"}
             except Exception as exc:
                 log_event("listener_error", channel=channel, error=str(exc))

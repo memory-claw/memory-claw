@@ -28,10 +28,25 @@ from institutional_memory.listener import (
     DedupeSet,
     ListenerState,
     handle_listener_event,
+    load_persisted_promotion_channels,
     resolve_channels,
 )
 from institutional_memory.slack_ingest import handle_message_event
 from institutional_memory.slack_promotion import PromotionRateLimiter, handle_reaction_event
+
+
+def _promotion_confirmation(result: dict) -> str | None:
+    status = result.get("status")
+    if status == "promoted":
+        prefix = "Saved to corpus"
+    elif status == "exists":
+        prefix = "Already saved to corpus"
+    else:
+        return None
+
+    lines = [f"{prefix}: {result.get('path')}"]
+    lines.append("Searchable after next ingest.")
+    return "\n".join(lines)
 
 
 def _build_state(web_client: WebClient) -> ListenerState:
@@ -46,6 +61,7 @@ def _build_state(web_client: WebClient) -> ListenerState:
     )
     if not promotion_allowed_channels:
         promotion_allowed_channels = set(allowed_channels)
+    promotion_allowed_channels.update(load_persisted_promotion_channels())
 
     return ListenerState(
         bot_user_id=bot_user_id,
@@ -93,6 +109,13 @@ def process(
                 rate_limiter=state.promotion_rate_limiter,
                 bot_user_id=state.bot_user_id,
             )
+            confirmation = _promotion_confirmation(result)
+            if confirmation and result.get("channel") and result.get("thread_ts"):
+                web_client.chat_postMessage(
+                    channel=result["channel"],
+                    text=confirmation,
+                    thread_ts=result["thread_ts"],
+                )
             print(json.dumps(result, ensure_ascii=False), flush=True)
             return
 
