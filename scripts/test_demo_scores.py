@@ -10,29 +10,32 @@ from institutional_memory.search import search_memory
 
 DEMO_QUERIES = {
     "credentials_sharing": (
-        "I'll send them the .env from my local machine so they can hit the staging APIs. "
-        "It has the AWS access keys and the production Postgres connection string. "
-        "Fastest way to get the new contractor unblocked on the analytics dashboard repo."
+        "Setting up the new intern's dev environment. I'll just send them our .env file "
+        "over Slack so they can hit the staging APIs. It has the AWS access keys and "
+        "Postgres connection string but it's a private channel so should be fine."
     ),
     "direct_push_main": (
-        "Found the bug causing 401s on the auth endpoint. It's a one-line fix in the JWT "
-        "token validation middleware. I'm just going to push it directly to main, don't want "
-        "to slow things down with a PR for something this small."
+        "Hey, found a small bug in the session timeout logic. Super obvious fix, "
+        "literally one line. Can I just push it directly to main? Don't want to wait "
+        "for a PR review at this time of day, it's trivial."
     ),
     "enterprise_deal_no_eng": (
-        "Nexus want to move forward. $180K deal, custom SSO integration plus data pipeline "
-        "into their warehouse. I told them 6 weeks. I'll get the contract signed this afternoon "
-        "and we can loop in engineering once we've won it."
+        "Big news — Vantara just said they want to move forward! $180K ARR, they want "
+        "custom SSO, a data pipeline into their BI tool, and white-labelling. I told "
+        "them 8 weeks. I'll get the contract signed today and loop in Marcus after "
+        "to figure out the engineering details."
     ),
     "no_feature_flag_billing": (
-        "The new billing UI is ready. Proration logic has been rewritten. Let's just ship it "
-        "straight to 100% of users today, no feature flag needed. It's been tested and we need "
-        "it out by friday."
+        "New billing UI is ready to ship. Proration calculation has been rewritten and "
+        "it's been tested on staging. Going to deploy it straight to 100% of users, no "
+        "feature flag. It's mostly UI changes and we need it out by Friday."
     ),
-    "gdpr_user_deletion": (
-        "A user deleted their account last year and now they're asking what data we still have. "
-        "I checked and their event history is still in the analytics table and the data warehouse. "
-        "Should we just tell them everything was deleted when they cancelled?"
+    "gdpr_user_data_retention": (
+        "Got a Subject Access Request from a former user who deleted their account "
+        "in 2022. I checked and their user_id is still in the events analytics table "
+        "and in our data warehouse. Account deletion only removed their row from the "
+        "users table — the event history and behaviour data was never deleted. What "
+        "do we do here?"
     ),
 }
 
